@@ -138,7 +138,7 @@ like a half-stealing deque.
   `'N207-'N214`). This is roughly because, thanks to seqcst-fences, a concurrent stealer should
   either (1) read from `bottom` a value `<= b-1`, or (2) read from `top` a value `<= t` and from
   `bottom` a value `<= max_bottom`. If the former is the case, it is obvious that the stealer cannot
-  steal the element at `b-1`; if the latter is the case, the stealer can steal upto the element at
+  steal the element at `b-1`; if the latter is the case, the stealer can steal up-to the element at
   `max_steal = t + (b - t + 1) / 2` (`'N206`, also see `'N506`), leaving the element at `b-1`
   intact.
 
@@ -150,7 +150,7 @@ like a half-stealing deque.
 
   If `b <= t`, then the deque is empty (`'N225-'N227`). As discussed in the [deque-proof
   RFC][deque-proof-rfc-optimal-orderings], the acquire-fence at `'N225` is necessary for linearizing
-  `pop()` invocations returning `EMPTY`.
+  `pop()` and `steal()` invocations returning `EMPTY`.
 
 
 
@@ -208,7 +208,7 @@ Roughly speaking, they may have agreed on a **steal bound function** `s(x)`, whe
 increasing, `s(x) <= x`, and `s(1) >= 1`, so that if the deque has `x` elements, `steal_half()` may
 try to steal at most `s(x)` elements and `pop()` takes at most `x - s(x)` elements.
 
-The optimal steal bounds will be different for different applications. We leave the perfmance
+The optimal steal bounds will be different for different applications. We leave the performance
 evaluation of various configurations for various applications as a future work.
 
 
