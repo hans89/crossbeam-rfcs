@@ -26,6 +26,36 @@ like a half-stealing deque.
 
 ## Proposed implementation
 
+- For reference, `steal()` is defined as follows:
+
+  ```rust
+  pub fn steal(&self) -> Option<T> {
+      'L401: let mut t = self.top.load(Relaxed);
+
+      'L402: let guard = epoch::pin_fence(); // epoch::pin(), but issue fence(SeqCst) even if it is re-entering
+      'L403: loop {
+      'L404:     let b = self.bottom.load(Acquire);
+      'N405:     if b - t <= 0 { return None; } // 'L405-'L407
+
+      'L408:     let buffer = self.buffer.load(Acquire, &guard);
+      'L409:     let value = buffer.read(t % buffer.get_capacity(), Relaxed);
+
+      'L410:     match self.top.compare_and_swap_weak(t, t + 1, Release) {
+      'L411:         Ok(_) => return Some(value),
+      'L412:         Err(t_old) => {
+      'L413:             mem::forget(value);
+      'L414:             t = t_old;
+      'L415:             fence(SeqCst);
+      'L416:         }
+      'L417:     }
+      'L418: }
+  }
+  ```
+
+  Note that the lines whose label starts with `N` (e.g. `'N111`) are those lines introduced in this
+  RFC; the other lines are introduced in the [deque-proof RFC][deque-proof-rfc]. Here, `'L405-'L407`
+  is just written in the single line `'N405`.
+
 - `steal_half()` is a straightforward generalization of `steal()` that steals half of the elements
   at once:
 
@@ -39,47 +69,47 @@ like a half-stealing deque.
       'N505:     if b - t <= 0 { return None; }
 
       'N506:     let max_steal = t + (b - t + 1) / 2;
-      'N507:     let buffer = self.buffer.load(Acquire, &guard);
-      'N508:     let values = buffer.read_range(t, max_steal, Relaxed);
+      'N508:     let buffer = self.buffer.load(Acquire, &guard);
+      'N509:     let values = buffer.read_range(t, max_steal, Relaxed);
 
-      'N509:     match self.top.compare_and_swap_weak(t, max_steal, Release) {
-      'N510:         Ok(_) => return Some(values),
-      'N511:         Err(t_old) => {
-      'N512:             mem::forget(values);
-      'N513:             t = t_old;
-      'N514:             fence(SeqCst);
-      'N515:         }
-      'N516:     }
-      'N517: }
+      'N510:     match self.top.compare_and_swap_weak(t, max_steal, Release) {
+      'N511:         Ok(_) => return Some(values),
+      'N512:         Err(t_old) => {
+      'N513:             mem::forget(values);
+      'N514:             t = t_old;
+      'N515:             fence(SeqCst);
+      'N516:         }
+      'N517:     }
+      'N518: }
   }
   ```
 
-  Note that the lines whose label starts with `N` (e.g. `'N111`) are those lines introduced in this
-  RFC; the other lines are explained in the [deque-proof RFC][deque-proof-rfc]. Here, `max_steal` is
-  the mid-point of `t` and `b` (`'N506`), and `steal_half()` tries to steal the elements at `[t,
-  max_steal)` and updates `top` to `max_steal`.
-
+  Here, `max_steal` is the mid-point of `t` and `b` (`'N506`), and `steal_half()` tries to steal the
+  elements at `[t, max_steal)` and updates `top` to `max_steal`.  `steal_half()` is different from
+  `steal()` only in `'N506` and `'N510`.
 
 - In order for stealers to safely steal half of the elements, it is necessary for the owner to
   abstain from popping too many elements (i.e. below `max_steal` calculated in `steal_half()`). For
-  example, consider a deque of 100 elements. A stealer may read `top = 0` and `bottom = 100`, and
-  then be preempted right after `'N504`. Concurrently, the worker may pop 60 elements. Now the
-  stealer may win the race in `'N509`, updating `top = 50` and stealing elements at `[0, 50)`. But
-  this is unsafe: the elements at `[40, 50)` are already popped.
+  example, consider a deque of 100 elements at `[0, 100)`. A stealer may read `top = 0` and `bottom
+  = 100`, and then be preempted right after `'N504`. Concurrently, the worker may pop 60
+  elements. Now the stealer may win the race in `'N509`, updating `top = 50` and stealing elements
+  at `[0, 50)`. But this is incorrect: the elements at `[40, 50)` are already popped.
 
-  For avoiding this unsafe situation, the owner records the maximum value of `bottom` after its last
+  For avoiding this scenario, the owner records the maximum value of `bottom` after its last
   successful steal (i.e. popping an element from the top end), which can be used to conservatively
   estimate `max_steal` calculated in concurrent `steal_half()` invocations:
 
   ```rust
   struct<T: Send> Inner<T> {
-      ...
-      max_bottom: Cell<isize>,
+      bottom: AtomicUsize,
+      top: AtomicUsize,
+      buffer: Ptr<Buffer<T>>,
+      max_bottom: Cell<isize>, // new
   }
   ```
 
-  In the companion implementation, `Deque<T>` has `max_bottom`, instead of `Inner<T>`. It is okay
-  because `max_bottom` is accessed only by the worker.
+  Note that in the companion implementation, `Deque<T>` has `max_bottom`, instead of `Inner<T>`. It
+  is okay because `max_bottom` is accessed only by the worker.
 
 
 - In order to maintain the up-to-date information, `push()` updates `max_bottom` if the new `bottom`
@@ -87,9 +117,19 @@ like a half-stealing deque.
 
   ```rust
   pub fn push(&self, value: T) {
-      ...
+      'L101: let b = self.bottom.load(Relaxed);
+      'L102: let t = self.top.load(Acquire);
+      'L103: let mut buffer = self.buffer.load(Relaxed, epoch::unprotected());
+
+      'L104: let cap = buffer.get_capacity();
+      'L105: if b - t >= cap {
+      'L106:     self.resize(cap * 2);
+      'L107:     buffer = self.buffer.load(Relaxed, epoch::unprotected());
+      'L108: }
+
+      'L109: buffer.write(b % buffer.get_capacity(), value, Relaxed);
       'L110: self.bottom.store(b + 1, Release);
-      
+
       'N111: if self.max_bottom.get() < b + 1 { self.max_bottom.set(b + 1); }
   }
   ```
@@ -156,12 +196,15 @@ like a half-stealing deque.
 
 ## Safety
 
-The proposed half-stealing deque is safe for almost the same reason with the deque proposed in the
-[deque-proof RFC][deque-proof-rfc].
-
+The proposed half-stealing deque is safe for almost the same reason as discussed in the [deque-proof
+RFC][deque-proof-rfc].
 
 
 ## Functional Correctness
+
+The specification and the overall proof structure are similar to those in the [deque-proof
+RFC][deque-proof-rfc].
+
 
 ## Specification
 
@@ -173,6 +216,49 @@ touches nothing and returns `EMPTY`.
 
 
 ## Construction of Linearization Order
+
+The linearization order is constructed in the same way as before. Here, assume that a `steal_half()`
+invocation that steals elements at `[x, y)` is in `STEAL^x`.
+
+It is worth noting that the meaning of `pop()` taking the regular and the irregular paths are
+changed as discussed above.
+
+FIXME(jeehoonkang): skip irregular `pop()` only if top order is good..
+
+
+## Auxiliary Definitions and Lemma
+
+Suppose that `O_i` is `pop()` taking the irregular path, and `x` be the value `O_i` read from
+`bottom` at `'L201`.
+
+- The proof of `(IRREGULAR-TOP)` is changed as follows.
+
+  Let `y` be the value `O_i` read from `top` at `'L205`. Since `O_i` is taking the irregular path,
+  we have `x-1 <= y`. If `x <= y`, then the conclusion trivially follows. If `y = x-1`, then `O_i`
+  tries to compare-and-swap (CAS) `top` from `x-1` to `x` at `'L213`. Regardless of whether the CAS
+  succeeds or fails, `O_i` reads or writes `top >= x`.
+
+  It is worth nothing that for this lemma to hold, it is necessary for the CAS at `'L213` to be
+  strong, i.e. the CAS does not spuriously fail.
+
+
+
+
+
+
+
+
+Also, the line numbers are a little bit changed, e.g. `'L210` in the [deque-proof
+RFC][deque-proof-rfc] corresponds to `'N204` in this RFC.
+
+
+The overall proof structure is the same as before. But as discussed above, the meaning of `pop()`
+taking the regular and the irregular paths are changed. Also, the line numbers are a little bit
+changed, e.g. `'L210` in the [deque-proof RFC][deque-proof-rfc] corresponds to `'N204` in this
+RFC. We list up the changes we needed to make in the proof.
+
+
+
 
 FIXME(jeehoonkang): TODO
 
@@ -647,7 +733,7 @@ view_end(O_j)[top]`, and by `(VIEW-LOC)`, the conclusion follows.
   Then `S_j` should have returned `EMPTY`. If `S_i` read from `WF_i` or `WL_i`, then
   `view_beginning(S_i)[bottom] <= Timestamp(WL_i) < Timestamp(WF_j) <= view_ending(S_j)[bottom]`,
   and by `(VIEW-LOC)`, the conclusion follows.
-  
+
   Not suppose otherwise. Then `S_i` should have returned a value. Let `x` be the value `O_(i+1)`,
   ..., `O_j` read from `bottom` at `'L201`. We have `view_beginning(S_i)[top] < x-1` by
   `(IRREGULAR-STEAL)`, and `x-1 <= view_end(S_j)[top]` by `(IRREGULAR-TOP)` and the fact that `S_j`
