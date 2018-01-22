@@ -26,7 +26,7 @@ like a half-stealing deque.
 
 ## Proposed implementation
 
-- `steal_half()` is a straightforward generalization of `steal()` for stealing half of the elements
+- `steal_half()` is a straightforward generalization of `steal()` that steals half of the elements
   at once:
 
   ```rust
@@ -61,15 +61,15 @@ like a half-stealing deque.
 
 
 - In order for stealers to safely steal half of the elements, it is necessary for the owner to
-  abstain from popping too many elements. For example, suppose a deque of 100 elements. A stealer
-  may read `top = 0` and `bottom = 100`, and then be preempted right after `'N504`. Concurrently,
-  the worker may pop 60 elements. Now the stealer may win the race in `'N509`, updating `top = 50`
-  and stealing elements at `[0, 50)`. But this is unsafe: the elements at `[40, 50)` are already
-  popped.
+  abstain from popping too many elements (i.e. below `max_steal` calculated in `steal_half()`). For
+  example, consider a deque of 100 elements. A stealer may read `top = 0` and `bottom = 100`, and
+  then be preempted right after `'N504`. Concurrently, the worker may pop 60 elements. Now the
+  stealer may win the race in `'N509`, updating `top = 50` and stealing elements at `[0, 50)`. But
+  this is unsafe: the elements at `[40, 50)` are already popped.
 
   For avoiding this unsafe situation, the owner records the maximum value of `bottom` after its last
-  successful steal, which can be used to conservatively estimate which elements are definitely not
-  stolen by concurrent stealers. More precisely, now `Inner<T>` has a field `max_bottom:
+  successful steal, which can be used to conservatively estimate `max_steal` calculated in
+  concurrent `steal_half()` invocations. More precisely, now `Inner<T>` has a field `max_bottom:
   Cell<isize>`, which stores the maximum value of `bottom` after its last successful steal from the
   top end:
 
@@ -84,7 +84,8 @@ like a half-stealing deque.
   because `max_bottom` is accessed only by the worker.
 
 
-- Now `push()` updates `max_bottom` if the new `bottom` is bigger than that:
+- In order to maintain the up-to-date information, `push()` updates `max_bottom` if the new `bottom`
+  is bigger than that:
 
   ```rust
   pub fn push(&self, value: T) {
@@ -96,7 +97,8 @@ like a half-stealing deque.
   ```
 
 
-- Now `pop()` recognizes `max_bottom`, and abstains from popping too many elements:
+- Now `pop()` recognizes `max_bottom`, estimates which elements are definitely not stolen by
+  concurrent stealers, and abstains from popping too many elements:
 
   ```rust
   pub fn pop(&self) -> Option<T> {
@@ -138,12 +140,14 @@ like a half-stealing deque.
   either (1) read from `bottom` a value `<= b-1`, or (2) read from `top` a value `<= t` and from
   `bottom` a value `<= max_bottom`. If the former is the case, it is obvious that the stealer cannot
   steal the element at `b-1`; if the latter is the case, the stealer can steal upto the element at
-  `max_steal = t + (b - t + 1) / 2` (`'N206`, also see `'N506`), leaving the element at `b-1` intact
-  thanks to `max_steal < b`.
+  `max_steal = t + (b - t + 1) / 2` (`'N206`, also see `'N506`), leaving the element at `b-1`
+  intact.
 
-  Otherwise, `pop()` try to steal the first element from the top end (the "irregular path",
+  Otherwise, `pop()` tries to steal the first element from the top end (the "irregular path",
   `'N215-'N227`). If successful, `max_bottom` is updated to the current value of `bottom`, since
-  later stealers should recognize `pop()`'s write to `bottom` at `'L202`.
+  later stealers should recognize `pop()`'s write to `bottom` at `'L202`. As a side effect,
+  **`pop()` no longer acts like a LIFO**: when it takes the irregular path, it may steal an element
+  from the top end.
 
   If `b <= t`, then the deque is empty (`'N225-'N227`). As discussed in the [deque-proof
   RFC][deque-proof-rfc-optimal-orderings], the acquire-fence at `'N225` is necessary for linearizing
@@ -153,39 +157,73 @@ like a half-stealing deque.
 
 ## Safety
 
-FIXME(jeehoonkang)
+The proposed half-stealing deque is safe for almost the same reason with the deque proposed in the
+[deque-proof RFC][deque-proof-rfc].
+
 
 
 ## Functional Correctness
 
-FIXME(jeehoonkang)
+## Specification
+
+As in the [deque-proof RFC][deque-proof-rfc], the half-stealing deque satisfies linearizability and
+synchronization properties. But as discussed above, the sequential specification of `pop()` is
+changed: if `t < b`, then a `pop()` invocation either (1) decreases the bottom index `b` and pop the
+last element, or (2) increases the top index `t` and steal the first element; otherwise, `pop()`
+touches nothing and returns `EMPTY`.
+
+
+## Construction of Linearization Order
+
+FIXME(jeehoonkang): TODO
+
+
+## Proof of `(VIEW)`
+
+FIXME(jeehoonkang): TODO
+
+
+## Proof of `(SEQ)` and `(SYNC)`
+
+FIXME(jeehoonkang): TODO
 
 
 
 # Discussion
 
-FIXME(jeehoonkang)
-
 ## Popping multiple elements
 
-## Stealing variably many elements
+`pop()` calculates `max_steal` and estimates which elements are not subject to be concurrently
+stolen (`'N206`). Using this information, `pop()` can safely pop multiple elements at once by (1)
+decreases `bottom` as much as it wants to pop (`'N202`), and (2) if not all elements are safe to pop
+in `'N208-'N213`, discard those unsafe elements and store `max_steal` to `bottom`. However, it's
+dubious whether this multi-popping is practically useful.
+
+
+## Steal strategies
+
+You may notice that `steal_half()` and `pop()` has _a priori_ agreement to steal at most half of the
+elements (`'N206` and `'N506`). They may have made another agreement. Roughly speaking, they may
+have agreed on a **steal strategy function** `s(x)`, where `s(x)` is increasing, `s(x) <= x`, and
+`s(1) >= 1`, so that if the deque has `x` elements, `steal_half()` tries to steal at most `s(x)`
+elements and `pop()` takes at most `x - s(x)` elements.
+
+The optimal strategy will be different for different applications. We leave the perfmance evaluation
+of various steal strategies for various applications as a future work.
+
 
 ## Comparison to prior work
 
-why storing max bottom is a good idea?
+FIXME(jeehoonkang): TODO. Why storing `max_bottom` is a good idea?
 
 
 
 
 ------------
 
+FIXME(jeehoonkang): remove the old text below.
+
 ## Proposed implementation
-
-We only describe the changes we made to the implementation proposed in the [deque-proof
-RFC][deque-proof-rfc].
-
-
-- 
 
 A work-stealing deque is owned by the "owner" thread (`Deque<T>`), which can push items to and pop
 items from the "bottom" end of the deque. Other threads, which we call "stealers" (`Stealer<T>`),
