@@ -26,10 +26,50 @@ like a half-stealing deque.
 
 ## Proposed implementation
 
+- `steal_half()` is a straightforward generalization of `steal()` for stealing half of the elements
+  at once:
+
+  ```rust
+  pub fn steal_half(&self) -> Steal<Vec<T>> {
+      'N501: let mut t = self.top.load(Relaxed);
+
+      'N502: let guard = epoch::pin_fence(); // epoch::pin(), but issue fence(SeqCst) even if it is re-entering
+      'N503: loop {
+      'N504:     let b = self.bottom.load(Acquire);
+      'N505:     if b - t <= 0 { return None; }
+
+      'N506:     let max_steal = t + (b - t + 1) / 2;
+      'N507:     let buffer = self.buffer.load(Acquire, &guard);
+      'N508:     let values = buffer.read_range(t, max_steal, Relaxed);
+
+      'N509:     match self.top.compare_and_swap_weak(t, max_steal, Release) {
+      'N510:         Ok(_) => return Some(values),
+      'N511:         Err(t_old) => {
+      'N512:             mem::forget(values);
+      'N513:             t = t_old;
+      'N514:             fence(SeqCst);
+      'N515:         }
+      'N516:     }
+      'N517: }
+  }
+  ```
+
+  Note that the lines whose label starts with `N` (e.g. `'N111`) are those lines introduced in this
+  RFC; the other lines are explained in the [deque-proof RFC][deque-proof-rfc]. Here, `max_steal` is
+  the mid-point of `t` and `b` (`'N506`), and `steal_half()` tries to steal the elements at `[t,
+  max_steal)` and updates `top` to `max_steal`.
+
+
 - In order for stealers to safely steal half of the elements, it is necessary for the owner to
-  abstain from popping too many elements. For that purpose, the owner records the maximum value of
-  `bottom` after its last successful steal, which can be used to conservatively estimate which
-  elements were definitely not stolen. More precisely, now `Inner<T>` has a field `max_bottom:
+  abstain from popping too many elements. For example, suppose a deque of 100 elements. A stealer
+  may read `top = 0` and `bottom = 100`, and then be preempted right after `'N504`. Concurrently,
+  the worker may pop 60 elements. Now the stealer may win the race in `'N509`, updating `top = 50`
+  and stealing elements at `[0, 50)`. But this is unsafe: the elements at `[40, 50)` are already
+  popped.
+
+  For avoiding this unsafe situation, the owner records the maximum value of `bottom` after its last
+  successful steal, which can be used to conservatively estimate which elements are definitely not
+  stolen by concurrent stealers. More precisely, now `Inner<T>` has a field `max_bottom:
   Cell<isize>`, which stores the maximum value of `bottom` after its last successful steal from the
   top end:
 
@@ -44,29 +84,16 @@ like a half-stealing deque.
   because `max_bottom` is accessed only by the worker.
 
 
-- `push()` updates `max_bottom` if the new `bottom` is bigger than that:
+- Now `push()` updates `max_bottom` if the new `bottom` is bigger than that:
 
   ```rust
   pub fn push(&self, value: T) {
-      'L101: let b = self.bottom.load(Relaxed);
-      'L102: let t = self.top.load(Acquire);
-      'L103: let mut buffer = self.buffer.load(Relaxed, epoch::unprotected());
-
-      'L104: let cap = buffer.get_capacity();
-      'L105: if b - t >= cap {
-      'L106:     self.resize(cap * 2);
-      'L107:     buffer = self.buffer.load(Relaxed, epoch::unprotected());
-      'L108: }
-
-      'L109: buffer.write(b % buffer.get_capacity(), value, Relaxed);
+      ...
       'L110: self.bottom.store(b + 1, Release);
       
       'N111: if self.max_bottom.get() < b + 1 { self.max_bottom.set(b + 1); }
   }
   ```
-
-  Note that the lines whose label starts with `N` (e.g. `'N111`) are those lines introduced in this
-  RFC; the other lines are explained in the [deque-proof RFC][deque-proof-rfc].
 
 
 - Now `pop()` recognizes `max_bottom`, and abstains from popping too many elements:
@@ -86,7 +113,7 @@ like a half-stealing deque.
       'N210:     if len < cap / 4 {
       'N211:         self.resize(cap / 2);
       'N212:     }
-      'N213:     return Some(buffer.read((b - 1) % buffer.get_capacity(), Relaxed));
+      'N213:     return Some(buffer.read(b - 1, Relaxed));
       'N214: }
 
       'N215: while t < b {
@@ -94,7 +121,7 @@ like a half-stealing deque.
       'N217:         Ok(_) => {
       'N218:             self.bottom.store(b, Relaxed);
       'N219:             self.max_bottom.set(b);
-      'N220:             return Some(buffer.read(t % buffer.get_capacity(), Relaxed));
+      'N220:             return Some(buffer.read(t, Relaxed));
       'N221:         }
       'N222:         Err(t_cur) => t = t_cur,
       'N223:     }
@@ -106,21 +133,47 @@ like a half-stealing deque.
   }
   ```
 
-  FIXME: In `pop()`, let `max_steal = (t + max_bottom + 1) / 2`. Then the elements at `max_steal` or
-  later are not subject to be stolen. This is because a concurrent stealer should have read from
-  `top` a value `<= t` and from `bottom` a value `<= max_bottom`, thereby stealing upto the element
-  at `max_steal - 1`.
+  Provided that `max_steal < b`, it is safe to pop the last element at `b-1`(the "regular path",
+  `'N207-'N214`). This is roughly because, thanks to seqcst-fences, a concurrent stealer should
+  either (1) read from `bottom` a value `<= b-1`, or (2) read from `top` a value `<= t` and from
+  `bottom` a value `<= max_bottom`. If the former is the case, it is obvious that the stealer cannot
+  steal the element at `b-1`; if the latter is the case, the stealer can steal upto the element at
+  `max_steal = t + (b - t + 1) / 2` (`'N206`, also see `'N506`), leaving the element at `b-1` intact
+  thanks to `max_steal < b`.
 
-  Thus `pop()` returns the last element at `b-1` if `max_steal <= b-1` (the "regular
-  path"). Otherwise, try to steal the first element from the top end (the "irregular path").
+  Otherwise, `pop()` try to steal the first element from the top end (the "irregular path",
+  `'N215-'N227`). If successful, `max_bottom` is updated to the current value of `bottom`, since
+  later stealers should recognize `pop()`'s write to `bottom` at `'L202`.
 
-  If the owner successfully stole an element from the top end, either in `pop()` taking the
-  irregular path or in `steal()`, `max_bottom` is updated to the current value of `bottom`.
+  If `b <= t`, then the deque is empty (`'N225-'N227`). As discussed in the [deque-proof
+  RFC][deque-proof-rfc-optimal-orderings], the acquire-fence at `'N225` is necessary for linearizing
+  `pop()` invocations returning `EMPTY`.
 
 
-- A stealer reads `t` from `top` and `b` from `bottom`, and steals upto the element at `(t + b + 1)
-  / 2 - 1`. This is, from the stealer's perspective, about the half the remaining elements in the
-  deque.
+
+## Safety
+
+FIXME(jeehoonkang)
+
+
+## Functional Correctness
+
+FIXME(jeehoonkang)
+
+
+
+# Discussion
+
+FIXME(jeehoonkang)
+
+## Popping multiple elements
+
+## Stealing variably many elements
+
+## Comparison to prior work
+
+why storing max bottom is a good idea?
+
 
 
 
@@ -1085,13 +1138,6 @@ follows:
 
 
 
-FIXME(jeehoonkang): multiple pop?
-
-FIXME(jeehoonkang): other than half?
-
-FIXME(jeehoonkang): comparison to prior work: why storing max bottom?
-
-
 [chase-lev]: https://pdfs.semanticscholar.org/3771/77bb82105c35e6e26ebad1698a20688473bd.pdf
 [chase-lev-weak]: http://www.di.ens.fr/~zappa/readings/ppopp13.pdf
 [fence-free-stealing]: http://www.cs.tau.ac.il/~mad/publications/asplos2014-ffwsq.pdf
@@ -1099,6 +1145,7 @@ FIXME(jeehoonkang): comparison to prior work: why storing max bottom?
 [deque-bounded-tso]: http://www.cs.tau.ac.il/~mad/publications/asplos2014-ffwsq.pdf
 [deque-pr]: https://github.com/jeehoonkang/crossbeam-deque/tree/half-stealing
 [deque-proof-rfc]: https://github.com/jeehoonkang/crossbeam-rfcs/blob/deque-proof/text/2018-01-07-deque-proof.md
+[deque-proof-rfc-optimal-orderings]: https://github.com/jeehoonkang/crossbeam-rfcs/blob/deque-proof/text/2018-01-07-deque-proof.md#optimal-orderings
 [rfc-relaxed-memory]: https://github.com/crossbeam-rs/rfcs/blob/master/text/2017-07-23-relaxed-memory.md
 [promising]: http://sf.snu.ac.kr/promise-concurrency/
 [promising-coq]: https://github.com/snu-sf/promising-coq
