@@ -68,10 +68,8 @@ like a half-stealing deque.
   this is unsafe: the elements at `[40, 50)` are already popped.
 
   For avoiding this unsafe situation, the owner records the maximum value of `bottom` after its last
-  successful steal, which can be used to conservatively estimate `max_steal` calculated in
-  concurrent `steal_half()` invocations. More precisely, now `Inner<T>` has a field `max_bottom:
-  Cell<isize>`, which stores the maximum value of `bottom` after its last successful steal from the
-  top end:
+  successful steal (i.e. popping an element from the top end), which can be used to conservatively
+  estimate `max_steal` calculated in concurrent `steal_half()` invocations:
 
   ```rust
   struct<T: Send> Inner<T> {
@@ -97,8 +95,9 @@ like a half-stealing deque.
   ```
 
 
-- Now `pop()` recognizes `max_bottom`, estimates which elements are definitely not stolen by
-  concurrent stealers, and abstains from popping too many elements:
+- Now `pop()` recognizes `max_bottom`, and estimates which elements are definitely not stolen by
+  concurrent stealers and safe to pop. Using this information, it abstains from popping too many
+  elements:
 
   ```rust
   pub fn pop(&self) -> Option<T> {
@@ -193,23 +192,24 @@ FIXME(jeehoonkang): TODO
 
 ## Popping multiple elements
 
-`pop()` calculates `max_steal` and estimates which elements are not subject to be concurrently
-stolen (`'N206`). Using this information, `pop()` can safely pop multiple elements at once by (1)
-decreases `bottom` as much as it wants to pop (`'N202`), and (2) if not all elements are safe to pop
-in `'N208-'N213`, discard those unsafe elements and store `max_steal` to `bottom`. However, it's
-dubious whether this multi-popping is practically useful.
+`pop()` can safely pop multiple elements at once as follows. Recall that `pop()` calculates
+`max_steal` and estimates which elements are definitely not stolen by concurrent stealers
+(`'N206`). Using this information, `pop()` decreases `bottom` as much as it wants to pop at
+`'N202`. Then if not all elements are safe to pop in `'N208-'N213`, `pop()` discards unsafe elements
+and stores `max_steal` to `bottom`. However, it's dubious whether this multi-popping scheme is
+practically useful.
 
 
-## Steal strategies
+## Stealing other-than-half elements
 
-You may notice that `steal_half()` and `pop()` has _a priori_ agreement to steal at most half of the
-elements (`'N206` and `'N506`). They may have made another agreement. Roughly speaking, they may
-have agreed on a **steal strategy function** `s(x)`, where `s(x)` is increasing, `s(x) <= x`, and
-`s(1) >= 1`, so that if the deque has `x` elements, `steal_half()` tries to steal at most `s(x)`
-elements and `pop()` takes at most `x - s(x)` elements.
+You may notice that `steal_half()` and `pop()` has _a priori_ agreement that a stealer may steal at
+most half of the elements (`'N206` and `'N506`). It is possible to make a different agreement.
+Roughly speaking, they may have agreed on a **steal bound function** `s(x)`, where `s(x)` is
+increasing, `s(x) <= x`, and `s(1) >= 1`, so that if the deque has `x` elements, `steal_half()` may
+try to steal at most `s(x)` elements and `pop()` takes at most `x - s(x)` elements.
 
-The optimal strategy will be different for different applications. We leave the perfmance evaluation
-of various steal strategies for various applications as a future work.
+The optimal steal bounds will be different for different applications. We leave the perfmance
+evaluation of various configurations for various applications as a future work.
 
 
 ## Comparison to prior work
