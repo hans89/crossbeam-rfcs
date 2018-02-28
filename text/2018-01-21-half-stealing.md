@@ -58,6 +58,169 @@ semantics paper][promising]. We hope [its Coq formalization][promising-coq] be u
 soon.
 
 
+## Proposed implementation
+
+As before, a half-stealing deque is owned by the "owner" thread (`Deque<T>`), which can push items
+to and pop items from the "bottom" end of the deque. Other threads, which we call "stealers"
+(`Stealer<T>`), try to steal items from the "top" end of the deque. The following is a summary of
+its interface:
+
+```rust
+impl<T: Send> Deque<T> { // Send + !Sync
+    pub fn new() -> Self { ... }
+    pub fn stealer(&self) -> Stealer<T> { ... }
+
+    pub fn push(&self, value: T) { ... }
+    pub fn pop(&self) -> Option<T> { ... } // None if empty
+}
+
+impl<T: Send> Stealer<T> { // Send + Sync + Clone
+    pub fn steal(&self) -> Option<T> { ... }
+    pub fn steal_half(&self) -> Option<Vec<T>> { ... }
+}
+```
+
+Chase and Lev proposed [an efficient implementation of deque][chase-lev] on sequentially consistent
+memory model, and Lê et. al. proposed [its variant for ARM and C/C++ relaxed-memory
+concurrency][chase-lev-weak]. This RFC presents an even more optimized variant for C/C++.
+
+A Chase-Lev deque consists of (1) the `bottom` index for the owner, (2) the `top` index for both the
+owner and the stealers, and (3) the underlying `buffer` that contains items, and (4) `max_bottom`,
+which is first introduced in this RFC, that stores the maximum value of `bottom` after the owner
+made a consensus using a CAS for the last time. When the buffer is too small or too large, the owner
+may replace it with one with more appropriate size:
+
+```rust
+struct<T: Send> Inner<T> {
+    bottom: AtomicUsize,
+    top: AtomicUsize,
+    buffer: Ptr<Buffer<T>>,
+    max_bottom: AtomicUsize, // new
+}
+
+impl<T: Send> Inner<T> {
+    ...
+}
+```
+
+The `Deque` and `Stealer` structs have a counted reference to the inner implementation, and delegate
+method invocations to it:
+
+```rust
+struct<T: Send> Deque<T> {
+    inner: Arc<Inner<T>>,
+}
+
+impl<T:Send> Deque<T> {
+    fn push(...) {
+        self.inner.push(...)
+    }
+
+    ...
+}
+
+...
+```
+
+The pseudocode for `Inner<T>`'s `fn push()`, `fn pop()`, `fn steal()`, and `fn steal_half()` is as
+follows:
+
+```rust
+pub fn push(&self, value: T) {
+    'L101: let b = self.bottom.load(Relaxed);
+    'L102: let t = self.top.load(Acquire);
+    'L103: let mut buffer = self.buffer.load(Relaxed, epoch::unprotected());
+
+    'L104: let cap = buffer.get_capacity();
+    'L105: if b - t >= cap {
+    'L106:     self.resize(cap * 2);
+    'L107:     buffer = self.buffer.load(Relaxed, epoch::unprotected());
+    'L108: }
+
+    'L109: buffer.write(b % buffer.get_capacity(), value, Relaxed);
+    'L110: self.bottom.store(b + 1, Release);
+
+    'N111: if self.max_bottom.get() < b + 1 { self.max_bottom.set(b + 1); }
+}
+
+pub fn pop(&self) -> Option<T> {
+    'L201: let b = self.bottom.load(Relaxed);
+    'L202: self.bottom.store(b - 1, Relaxed);
+    'L203: fence(SeqCst);
+    'N204: let buffer = self.buffer.load(Relaxed, epoch::unprotected());
+    'N205: let mut t = self.top.load(Relaxed);
+    'N206: let mut len = b - t;
+    'N207: let max_steal = t + (self.max_bottom.get() - t + 1) / 2;
+
+    'N207: {   while 2 <= len {
+    if max_steal < b {
+    'N208:     let let = b - t;
+    'N209:     let cap = buffer.get_capacity();
+    'N210:     if len < cap / 4 {
+    'N211:         self.resize(cap / 2);
+    'N212:     }
+    'N213:     return Some(buffer.read(b - 1, Relaxed));
+    'N214: }
+
+    'N215: while t < b {
+    'N216:     match self.top.compare_and_swap_weak(t, t + 1, Release, Relaxed) {
+    'N217:         Ok(_) => {
+    'N218:             self.bottom.store(b, Relaxed);
+    'N219:             self.max_bottom.set(b);
+    'N220:             return Some(buffer.read(t, Relaxed));
+    'N221:         }
+    'N222:         Err(t_cur) => t = t_cur,
+    'N223:     }
+    'N224: }
+
+    'N225: fence(Acquire);
+    'N226: self.bottom.store(b, Relaxed);
+    'N227: None
+}
+
+fn resize(&self, cap_new) {
+    'L301: let b = self.bottom.load(Relaxed);
+    'L302: let t = self.top.load(Relaxed);
+    'L303: let old = self.buffer.load(Relaxed, epoch::unprotected());
+    'L304: let new = Buffer::new(cap_new);
+
+    'L305: ... // copy data from old to new
+
+    'L306: let guard = epoch::pin();
+    'L307: self.buffer.store(Owned::new(new).into_shared(guard), Release);
+    'L308: guard.defer(move || old.into_owned());
+}
+
+pub fn steal(&self) -> Option<T> {
+    'L401: let mut t = self.top.load(Relaxed);
+
+    'L402: let guard = epoch::pin_fence(); // epoch::pin(), but issue fence(SeqCst) even if it is re-entering
+    'L403: loop {
+    'L404:     let b = self.bottom.load(Acquire);
+    'L405:     if b - t <= 0 {
+    'L406:         return None;
+    'L407:     }
+
+    'L408:     let buffer = self.buffer.load(Acquire, &guard);
+    'L409:     let value = buffer.read(t % buffer.get_capacity(), Relaxed);
+
+    'L410:     match self.top.compare_and_swap_weak(t, t + 1, Release) {
+    'L411:         Ok(_) => return Some(value),
+    'L412:         Err(t_old) => {
+    'L413:             mem::forget(value);
+    'L414:             t = t_old;
+    'L415:             fence(SeqCst);
+    'L416:         }
+    'L417:     }
+    'L418: }
+}
+```
+
+
+
+
+
+
 
 
 - For reference, `steal()` is defined as follows:
