@@ -2,7 +2,7 @@
 
 This RFC proposes an implementation of dynamic-sized circular **many-stealing** double-ended queue
 (deque) on Crossbeam, and proves its linearizability. this RFC has a [companion PR to
-`crossbeam-deque`][deque-pr-many]. 
+`crossbeam-deque`][deque-pr-many].
 
 We try to write this RFC as much self-contained as possible. In particular, while this RFC shares a
 lot of details with the [deque-proof RFC][rfc-deque], which proves the linearizability of the
@@ -87,9 +87,9 @@ concurrency][chase-lev-weak]. This RFC presents an even more optimized variant f
 
 A Chase-Lev deque consists of (1) the `bottom` index for the owner, (2) the `top` index for both the
 owner and the stealers, and (3) the underlying `buffer` that contains items. When the buffer is too
-small or too large, the owner may replace it with one with more appropriate size. This RFC
-introduces `max_bottom`, which basically stores the maximum value of `bottom` after the last
-successful CAS on `top` by `pop()`:
+small or too large, the owner may replace it with one with more appropriate size. In addition, this
+RFC introduces `max_bottom`, which basically stores the maximum value of `bottom` after the last
+successful CAS on `top` by `pop()`<sup id="a1">[1](#f1)</sup>:
 
 ```rust
 struct<T: Send> Inner<T> {
@@ -154,7 +154,7 @@ pub fn pop(&self) -> Option<T> {
 
     'M207: 'irregular: {
     'M208:     let max_bottom = self.max_bottom.load(Ordering::Relaxed);
-    'M209:     let max_steal = t + (max_bottom + 1 - t) / 2;
+    'M209:     let max_steal = t + (max_bottom - t + 1) / 2;
 
     'M210:     if max_steal < b { break 'irregular; }
 
@@ -233,10 +233,11 @@ pub fn steal_many(&self) -> Steal<Vec<T>> {
     'L504: if len <= 0 { return Empty; }
 
     'L505: let buffer = self.buffer.load(Acquire, &guard);
-    'M5051: let max_steal = t + (b + 1 - t) / 2;
+    'M5051: let max_steal = t + (len + 1) / 2;
+
     'L506: let values = buffer.read_range(t, max_steal, Relaxed);
 
-    'L507: if self.top.compare_and_swap_weak(t, max_steal, Release, Relaxed).is_err() {
+    'M507: if self.top.compare_and_swap_weak(t, max_steal, Release, Relaxed).is_err() {
     'L508:     mem::forget(values);
     'L509:     return Retry;
     'L510: }
@@ -244,6 +245,41 @@ pub fn steal_many(&self) -> Steal<Vec<T>> {
     'L511: Data(values)
 }
 ```
+
+Note that the lines whose label starts with `M` (e.g. `M111`) are those lines introduced in this
+RFC; the other lines are introduced in the [deque-proof RFC][rfc-deque].
+
+
+
+## How to safety steal many elements?
+
+In order for stealers to safely steal many elements, it is necessary for the owner to abstain from
+popping too many elements. For example, consider a deque of 100 elements at `[0, 100)`. A stealer
+may read `top = 0` and `bottom = 100`, and then be preempted right after `'L504`. In this case, it
+is unsafe for the worker to pop 60 elements, because now the stealer may win the race in `'N509`,
+updating `top = 50` and stealing elements at `[0, 50)`, of which the elements at `[40, 50)` are
+already popped.
+
+The owner decides which elements are safe as follows.
+
+First, the owner records the maximum value of `bottom` after its last successful update to `top` at
+`max_bottom` (at `'M111`, `'M216`). By a suitable synchronization, a concurrent stealer cannot read
+the value of `bottom` staler than the last successful `top`. So `max_bottom` is the biggest value of
+`bottom` a concurrent stealer may read.
+
+Second, calculate 
+
+
+(i.e. below `max_steal` calculated in `steal_half()`).
+
+
+Comparing to the original Chase-Lev deque on relaxed-memory concurrency, now `push()` updates
+`max_bottom` if the new `bottom` is bigger than that at `'M111`; `pop()` is completely rewritten:
+now it recognizes `max_bottom`, estimates which elements are definitely not stolen by concurrent
+stealers, and abstains from popping the stealable elements; `steal()` checks at `'M4032` if the
+anomaly caused by `pop()`'s "jump" at `'M211-M220`; and `steal_many()` differs from `steal()` only
+in that it steals many elements at `'M507`.
+
 
 
 ## Safety
@@ -463,7 +499,7 @@ Suppose that `O_i` is `pop()` taking the irregular path, and `x` be the value `O
   `y <= x` from the condition at `'L404`, so suppose `y = x` and let's derive a contradiction.
 
   + Case `S` read `bottom = x` written at `'L207`.
-  
+
     Then `O_i` read `top >= x` at `'L204`. In order for `S` to read `bottom = x` at `'L403` and
     `O_i` to read `top >= x` at `'L204` at the same time, either `S`'s write to `top` at `'L407`
     should be promised before reading `bottom` at `'L403`, or `O_i`'s write to `bottom` at `'L207`
@@ -528,7 +564,7 @@ view_end(O_j)[top]`, and by `(VIEW-LOC)`, the conclusion follows.
   Then `S_j` should have returned `EMPTY`. If `S_i` read from `WF_i` or `WL_i`, then
   `view_beginning(S_i)[bottom] <= Timestamp(WL_i) < Timestamp(WF_j) <= view_ending(S_j)[bottom]`,
   and by `(VIEW-LOC)`, the conclusion follows.
-  
+
   Not suppose otherwise. Then `S_i` should have returned a value. Let `x` be the value `O_(i+1)`,
   ..., `O_j` read from `bottom` at `'L201`. We have `view_beginning(S_i)[top] < x-1` by
   `(IRREGULAR-STEAL)`, and `x-1 <= view_end(S_j)[top]` by `(IRREGULAR-TOP)` and the fact that `S_j`
@@ -1093,6 +1129,11 @@ whenever a stealer succeeded in stealing elements. On the other hand, our worker
 the number of CAS because we recorded `max_bottom`, instead of recording `max_steal` as [Hendler _et
 al_.][steal-half] did.
 
+
+
+<b id="f1">1</b> Note that in the companion implementation, `Deque<T>` has `max_bottom:
+Cell<usize>`, instead of `Inner<T>` having `max_bottom: AtomicUsize`. It is okay because
+`max_bottom` is accessed only by the worker. [↩](#a1)
 
 [chase-lev]: https://pdfs.semanticscholar.org/3771/77bb82105c35e6e26ebad1698a20688473bd.pdf
 [chase-lev-weak]: http://www.di.ens.fr/~zappa/readings/ppopp13.pdf
