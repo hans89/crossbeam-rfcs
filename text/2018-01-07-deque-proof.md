@@ -295,7 +295,7 @@ A shared object is **linearizable** as a deque if the following holds:
 >   (i.e. non-concurrently) executed to a deque in the linearization order.
 
 Here, by `signature(I)` and `ret(I)` we mean the function call signature and the return value of
-`I`. Also, by `I <V J` we mean `view_end(I) < view_beginning(J)`, and by `view_beginning(I)` and
+`I`. Also, by `I <V J` we mean `view_end(I) < view_begin(J)`, and by `view_begin(I)` and
 `view_end(I)` we mean the thread `I`'s view at the beginning and the end of the invocation. A view
 `v1` is less than or equal to another view `v2`, denoted by `v1 <= v2`, if for any location `l`,
 `v1[l] <= v2[l]` holds; and `v1` is less than `v2`, denoted by `v1 < v2`, if (1) `v1 <= v2`, and (2)
@@ -306,7 +306,7 @@ In addition to linearizability, we require that a matching pair of `push()` and 
 synchronize like a matching pair of a release-store and an acquire-load:
 
 > - (SYNC) If a value is `push()`ed by an invocation `I` and then `steal()`ed by an invocation `J`,
->   then `view_beginning(I) <= view_end(J)` holds.
+>   then `view_begin(I) <= view_end(J)` holds.
 
 Note that a similar property for a matching pair of `push()` and `pop()` is a corollary of
 linearizability, as only the owner is able to call `push()` and `pop()` and the `push()` should be
@@ -331,7 +331,7 @@ fn client() {
 }
 ```
 
-and `view_beginning(i_1) = view_end(i_1) = view_beginning(i_2) = view_end(i_2)`. By definition, `i_2
+and `view_begin(i_1) = view_end(i_1) = view_begin(i_2) = view_end(i_2)`. By definition, `i_2
 -> i_1` is a legit linearization order, yet *morally* `i_1` should be ordered before `i_2` because
 it is so in the program order. However, we do not regard it as a problem: if `i_1` and `i_2` do not
 change the view, they are read-only, and should not change the state of the shared object. Thus it
@@ -378,126 +378,213 @@ the linearization order as follows:
   is such a linearization because the `<V` relation is acyclic. Also, there can be more than one
   linearizations of `STEAL_EMPTY` invocations.)
 
+### Summary List of Auxiliary Definitions
 
-### Auxiliary Definitions and Lemma
+- > (IRREGULAR-PATH): `pop()` is said to take the irregular path (or to be irregular)
+when it does not enter `'L219`. This means that it fails to pop normally, either because
+the deque is empty (entering `'L207`), or because it needs to race to pop
+(entering `'L213`).
 
-Let `WF_i` and `WL_i` be `O_i`'s first and last write to `bottom`.
+- > (FIRST-WRITE) and (LAST-WRITE): For an owner invocation `O_i`, `WF_i` and `WL_i`
+stand for the first and the last write,
+respectively, of `O_i` to `bottom`. Note that only owner invocations
+write to `bottom`.
 
-- > (VIEW-LOC): If `view_beginning(I)[loc] < view_end(J)[loc]` for some `loc`, then it is not the
-  case that `J <V I`.
+- > (INVOCATION-STRICTLY-HAPPENS-BEFORE) `I <V J`: `I` stricly happens before
+(and thus synchornizes with) `J` when `view_end(I) < view_begin(J)`.
 
-  Since `view_beginning(I)[loc] < view_end(J)[loc]` holds, it is not the case that
-  `view_end(J) < view_beginning(J)` holds.
+- > (VIEW-STRICT-ORDER) `v1 < v2`: if (1) `v1 <= v2` and (2) there exists `l`
+such that `v1[l] < v2[l]`.
 
-Suppose that `O_i` is `pop()` taking the irregular path, and `x` be the value `O_i` read from
-`bottom` at `'L201`.
+- > (VIEW-ORDER) `v1 <= v2`: for any location `l`, `v1[l] <= v2[l]`.
 
-- > (IRREGULAR-TOP): We have [timestamp of `top = x`] <= `view_end(O_i)[top]`.
+- > `TS[top = x]`: the timestamp (of type `Timestamp = Q+`) at which `top` has
+  value `x`. This is the timestamp of the write of `x` to `top`. Since we only
+  increase `top` by CAS at `'L213` or `'L407`, there is a unique timestamp for
+  each value written to `top`. Therefore `TS[top = x]` is always well-defined.
+  In the rest of this RFC, the values of `top` and the timestamps of `top`
+  are interchangeable.
 
-  First of all, the notation "[timestamp of `top = x`]" is well-defined, since `top` is
-  monotonically increasing by CAS at `'L213` or `'L407`, so that there can be only one write `top =
-  x` for each value `x`. For this reason, in the rest of this RFC, we intentionally confuse the
-  values of `top` with the timestamps of `top`.
+### Auxiliary Lemmas
 
-  Let `y` be the value `O_i` read from `top` at `'L204`. Since `O_i` is taking the irregular path,
-  we have `x-1 <= y`. If `x <= y`, then the conclusion trivially follows. If `y = x-1`, then `O_i`
-  tries to compare-and-swap (CAS) `top` from `x-1` to `x` at `'L213`. Regardless of whether the CAS
-  succeeds or fails, `O_i` reads or writes `top >= x`.
+- > (VIEW-LOC): If `view_begin(I)[loc] < view_end(J)[loc]` for some `loc`,
+then `NOT (J <V I)`.
 
-  It is worth nothing that for this lemma to hold, it is necessary for the CAS at `'L213` to be
-  strong, i.e. the CAS does not spuriously fail.
+  Trivial. Suppose `J <V I`, then `view_end(J) < view_begin(I)`.
+  So `view_end(J)[loc] <= view_begin(I)[loc] < view_end(J)[loc]`.
+  Contradiction.
 
-- > (IRREGULAR-STEAL): Let `S` be a successful `steal()` that reads from `bottom` a value written by
-  `O_i`, and `y` be the value `S` writes to `top` at `'L407`. Then `y < x` holds.
+- > (TOP-INCREASING): `x <= y` if and only if `TS[top = x] <= TS[top = y]`.
 
-  If `S` read `bottom = x-1` written by `O_i` at `'L202`, then `y <= x-1` from the condition at
-  `'L404`. Otherwise, `S` read `bottom = x` written by `O_i` at `'L207` or `'L216`. We already know
-  `y <= x` from the condition at `'L404`, so suppose `y = x` and let's derive a contradiction.
+  Trivial since `top` is only increased with CASes.
+
+- > (IRREGULAR-TOP): Suppose that `O_i` is an irregular `pop()`, and `x` be the
+value `O_i` read from `bottom` at `'L201`. Then `TS[top = x] <= view_end(O_i)[top]`.
+
+  **Intuition**: an irregular `pop()` always updates its timestamp of `top`
+  beyond the value `x` it reads from `bottom`.
+
+  Let `y` be the value `O_i` read from `top` at `'L204`. Since `O_i` is taking the
+  irregular path, we have `x-1 <= y`.
+
+  If `x-1 < y`, then `x <= y`, then the conclusion trivially follows from `(TOP-INCREASING)` : `TS[top = x] <= TS[top = y] <=  view_end(O_i)[top]`.
+
+  If `x-1 = y`, then `O_i` tries to compare-and-swap (CAS) `top` from `x-1` to `x`
+  at `'L213`. Regardless of whether the CAS succeeds or fails, `O_i` reads or writes
+  `top >= x`. The conclusion again trivially follows from `(TOP-INCREASING)`.
+  It's worth noting in this case that it is necessary for the CAS at
+  `'L213` to be strong, i.e. the CAS does not spuriously fail. If the CAS fails
+  spuriously, it is not guaranteed to read a value `>= x`.
+
+- > (IRREGULAR-STEAL): Suppose that `O_i` is an irregular `pop()`,
+and `x` be the value `O_i` read from `bottom` at `'L201`.
+Also suppose `S` is a successful `steal()` that reads from `bottom` a value
+written by `O_i`, and `y` be the value `S` writes to `top` at `'L407`.
+Then `y < x` holds.
+
+  **Note**: this is the most important lemma in the proof, which involves
+  reasoning about promises. Reasoning about promises, however, is only needed
+  since we want to linearize `STEAL_EMPTY` also.
+
+  **Intuition**: if a successful `steal()` reads from `bottom` a value written
+  by an irregular `pop()`, then the element `y-1` stolen by the `steal()` must be
+  before the element `x-1` that the `pop()` was trying to take by CAS.
+  This justifies why a successful `steal()` can be ordered before an irregular
+  `pop()` that it reads from. Note that the `steal()` is even ordered before
+  the whole chain of irregular `pop()`'s that starts with the `pop()` that the
+  `steal()` reads from, since the `pop()`'s in the chain would all read the same
+  value `x` from `bottom` and try to take the same `x-1`.
+  Note also that `steal()` writes `y` to `top` to steal `y-1`.
+
+  + Case `S` read `bottom = x-1` written by `O_i` at `'L202`. Then from the condition
+  at `'L404`, `y-1 < x-1`, or `y <= x-1 < x`.
+
+  Otherwise, suppose `S` reads `bottom = x` written by `O_i` at `'L207` or `'L216`.
+  From the condition at `'L404`, `y-1 < x`, or `y <= x`. So suppose `y = x` and
+  let's derive a contradiction.
 
   + Case `S` read `bottom = x` written at `'L207`.
 
-    Then `O_i` read `top >= x` at `'L204`. In order for `S` to read `bottom = x` at `'L403` and
-    `O_i` to read `top >= x` at `'L204` at the same time, either `S`'s write to `top` at `'L407`
-    should be promised before reading `bottom` at `'L403`, or `O_i`'s write to `bottom` at `'L207`
-    should be promised before reading `top` at `'L204`. But this is impossible. For the former,
-    `S`'s write to `top` at `'L407` is a release-store. For the latter, in order for `O_i` to
-    promise to write `bottom = x` at `'L207`, `O_i` should have read `top = x-1` at `'L204` and then
-    execute the CAS at `'L213` in certification. But a certain future memory mandates the CAS to
-    fail, acquiring an arbitrarily high view, after which it is impossible to fulfill the
-    promise. In short, there is a semantic dependency from `O_i`'s read from `top` at `'L204` to
-    `O_i`'s write to `bottom` at `'L207`.
+    Then by the condition at `'L206` `O_i` read `top >= x` at `'L204`.
+    But `S` is the only one that writes `y = x`. So we have a *load-buffering*
+    cycle between `'L204` + `'L207` and `'L403` + `'L407`.
 
-    It is worth noting that in architectures, such as ARM and Power, usually it is enough to show
-    that there is syntactic dependency from `O_i`'s read from `top` at `'L204` to `O_i`'s write to
-    `bottom` at `'L207`. We have to reason semantic dependency because we are targeting C-like
+    In order for this to happen, either (a) `S`'s write to `top` at `'L407`
+    should be promised before reading `bottom` at `'L403`, or (b) `O_i`'s write to
+    `bottom` at `'L207` should be promised before reading `top` at `'L204`.
+    But both cases are impossible. For (a), `S`'s write at `'L407` is a
+    release-store.
+
+    For (b), in order for `O_i` to promise to write `bottom = x` at `'L207`,
+    the promise must have happened after then SC fence at `'L203`, and must be
+    certified then. The promise must be able to be certified for all possible
+    future memory---including the memory where `O_i` reads `top = x-1` at
+    `'L204` and then executes the CAS at `'L213`. But a certain future memory
+    mandates the CAS to fail, acquiring an arbitrarily high view, after which it is
+    impossible to fulfill the promise. In short, there is a semantic dependency
+    from `O_i`'s read from `top` at `'L204` to `O_i`'s write to `bottom` at `'L207`.
+
+    It is worth noting that in architectures such as ARM and Power it usually is
+    enough to show that there is syntactic dependency from `O_i`'s read from `top`
+    at `'L204` to `O_i`'s write to `bottom` at `'L207`. We have to reason about
+    semantic dependency because we are targeting C-like
     languages, where compilers may perform various optimizations.
 
   + Case `S` read `bottom = x` written at `'L216`.
 
-    Then `O_i` executes the CAS at `'L213`. Since `S` writes `top = x`, it is impossible for the CAS
-    to succeed. Since the CAS is strong, `O_i` should have read `top >= x`. Then there is a
-    release-acquire synchronization from `S`'s write to `top` at `'L407` to `O_i`'s read from `top`
-    at `'L213`. Thus it is impossible for `S` to read from `bottom` at `'L403` the value `x` written
-    by `O_i` at `'L216`.
+    Then `O_i` executes the CAS at `'L213`. Since `S` writes `top = x`, it is impossible
+    for the CAS to succeed. Since the CAS is strong, `O_i` should have read `top >= x`.
+    Then there is a release-acquire synchronization from `S`'s write to `top` at
+    `'L407` to `O_i`'s read from `top` at `'L213`. Thus it is impossible for `S`
+    to read from `bottom` at `'L403` the value `x` written by `O_i` at `'L216`.
 
+    > COROLLARY: `view_begin(S)[top] < TS[top = x-1]`.
+
+    By `(IRREGULAR-STEAL)`, `S` writes some value `y < x` to `top`.
+    By `(TOP-INCREASING)` and coherence, `view_begin(S)[top] < TS[top = x-1]`.
 
 ### Proof of `(VIEW)`
 
 For `(VIEW)`, it is sufficient to prove that:
 
-1. `(VIEW-OWNER-STEAL)`: for all `i <= j` and `S ∈ G_j`, it is not the case that `S <V O_i`.
-2. `(VIEW-STEAL-OWNER)`: for all `i < j` and `S ∈ G_i`, it is not the case that `O_j <V S`.
-3. `(VIEW-STEAL-INTER-GROUP)`: for all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`, it is not the case that
-   `S_j <V S_i`.
-4. `(VIEW-STEAL-INTRA-GROUP)`: for all `i` and `S, S' ∈ G_i`, if `S` is placed before `S'`, then it
-   is not the case that `S' <V S`.
+1. `(VIEW-OWNER-STEAL)`: for all `i <= j` and `S ∈ G_j`, then `NOT (S <V O_i)`.
+2. `(VIEW-STEAL-OWNER)`: for all `i < j` and `S ∈ G_i`, then `NOT (O_j <V S)`.
+3. `(VIEW-STEAL-INTER-GROUP)`: for all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`,
+    then `NOT (S_j <V S_i)`.
+4. `(VIEW-STEAL-INTRA-GROUP)`: for all `i` and `S, S' ∈ G_i`, if `S` is ordered
+    before `S'`, then `NOT (S' <V S)`.
 
-(Note that what would be `(VIEW-OWNER-OWNER)` is obvious from the fact that `{O_i}` is sorted
-according to the program order.)
+Note that what would be `(VIEW-OWNER-OWNER)` is obvious from the fact that `{O_i}`
+is sorted according to the program order.
 
 #### Proof of `(VIEW-OWNER-STEAL)`
 
-Since `O_i` wrote `WF_i`, we have `view_beginning(O_i)[bottom] < Timestamp(WF_i)`. Furthermore,
-since the value `S` read from `bottom` is coherence-after-or `WF_j`, we have `Timestamp(WF_j) <=
-view_end(S)[bottom]`. Thus `view_beginning(O_i)[bottom] < Timestamp(WF_i) <= Timestamp(WF_j) <=
-view_end(S)[bottom]`, and by `(VIEW-LOC)`, it is not the case that `S <V O_i`.
+> For all `i <= j` and `S ∈ G_j`, then `NOT (S <V O_i)`.
+
+Since `O_i` writes `WF_i`, we have `view_begin(O_i)[bottom] < Timestamp(WF_i)`.
+Furthermore, since the value `S` read from `bottom` is coherence-after-or `WF_j`,
+we have `Timestamp(WF_j) <= view_end(S)[bottom]`. Thus
+`view_begin(O_i)[bottom] < Timestamp(WF_i) <= Timestamp(WF_j) <= view_end(S)[bottom]`.
+So by `(VIEW-LOC)`, `NOT (S <V O_i)`.
 
 #### Proof of `(VIEW-STEAL-OWNER)`
 
-If `S` returns `EMPTY`, then `view_beginning(S)[bottom] <= Timestamp(WL_i) < Timestamp(WL_j) <=
-view_end(O_j)[bottom]`, and by `(VIEW-LOC)`, the conclusion follows.
+> For all `i < j` and `S ∈ G_i`, then `NOT (O_j <V S)`.
 
-Now suppose `S` returns a value. Let `O_k` be such an owner invocation that the value `S` read from
-`bottom` at `'L403` is written by `O_k`. Then by the construction of the linearization order, for
-all `l ∈ (i, k]`, `O_l` is `pop()` taking the irregular path. If `k < j`, then
-`view_beginning(S)[bottom] <= Timestamp(WL_k) < Timestamp(WL_j) <= view_end(O_j)[bottom]`, and by
-`(VIEW-LOC)`, the conclusion follows.
+If `S` returns `EMPTY`, then `S` reads from `O_i`. So
+`view_begin(S)[bottom] <= Timestamp(WL_i) < Timestamp(WL_j) <= view_end(O_j)[bottom]`.
+Thus by `(VIEW-LOC)`, the conclusion follows.
 
-Now suppose `j ∈ (i, k]`. Let `x` and `y` be the values `O_j` read from `bottom` at `'L201` and
-`top` at `'L204`, respectively. Since `O_l` is `pop`() taking the irregular path for all `l ∈ (j,
-k]`, `O_k` also read `x` from `bottom` at `'L201`. Then we have `x-1 <= y` by the fact that `O_j` is
-a `pop()` taking the irregular path, `view_beginning(S)[top] < x-1` by `(IRREGULAR-STEAL)`, and `x
-<= view_end(O_j)[top]` by `(IRREGULAR-TOP)`. Thus we have `view_beginning(S)[top] < x-1 < x <=
-view_end(O_j)[top]`, and by `(VIEW-LOC)`, the conclusion follows.
+Now suppose `S` returns a value. Let `O_k` be such an owner invocation that the
+value `S` reads from `bottom` at `'L403` is written by `O_k`. Then by the construction of
+the linearization order, for all `l ∈ (i, k]`, `O_l` is an irregular `pop()`.
+
+If `k < j`, then `view_begin(S)[bottom] <= Timestamp(WL_k) < Timestamp(WL_j) <=
+view_end(O_j)[bottom]`. So by `(VIEW-LOC)`, the conclusion follows.
+
+Now suppose `j ∈ (i, k]`. Let `x` and `y` be the values `O_j` read from `bottom` at
+`'L201` and `top` at `'L204`, respectively.
+Since all the owner invocations between `j` and `k` are irregular `pop()`'s,
+`O_k` also read `x` from `bottom` at `'L201`.
+By `COROLLARY of (IRREGULAR-STEAL)`, `view_begin(S)[top] < TS[top = x-1]`.
+
+Also, by the fact that `O_j` is an irregular `pop()`, we have `x-1 <= y`.
+By `(TOP-INCREASING)` again, `TS[top = x-1] <= TS[top = y]`.
+
+We have `view_begin(S)[top] < TS[top = x-1] <= TS[top = y] <= view_end(O_j)[top]`.
+Thus by `(VIEW-LOC)`, the conclusion follows.
 
 #### Proof of `(VIEW-STEAL-INTER-GROUP)`
 
-- Case 1: `O_(i+1)`, ..., `O_j` are all `pop()` taking the irregular path.
+> For all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`, then `NOT (S_j <V S_i)`.
 
-  Then `S_j` should have returned `EMPTY`. If `S_i` read from `WF_i` or `WL_i`, then
-  `view_beginning(S_i)[bottom] <= Timestamp(WL_i) < Timestamp(WF_j) <= view_ending(S_j)[bottom]`,
-  and by `(VIEW-LOC)`, the conclusion follows.
+Since `S_j` reading `bottom` is coherence-after-or `WF_j`, we have `Timestamp(WF_j) <= view_end(S_j)[bottom]`.
 
-  Not suppose otherwise. Then `S_i` should have returned a value. Let `x` be the value `O_(i+1)`,
-  ..., `O_j` read from `bottom` at `'L201`. We have `view_beginning(S_i)[top] < x-1` by
-  `(IRREGULAR-STEAL)`, and `x-1 <= view_end(S_j)[top]` by `(IRREGULAR-TOP)` and the fact that `S_j`
-  read `x-1` or `x` from `bottom` at `'L403`. By `(VIEW-LOC)`, the conclusion follows.
+Suppose `S_i` returns `EMPTY`. Then `S_i` reads from `O_i`. So
+`view_begin(S_i)[bottom] <= Timestamp(WL_i) < Timestamp(WF_j) <= view_end(S_j)[bottom]`.
+By `(VIEW-LOC)`, the conclusion follows.
 
-- Case 2: Otherwise.
+Now suppose `S_i` returns a value. This is now very similar to the subproof of
+`(VIEW-STEAL-OWNER)`.
 
-  Let `O_k` be such an invocation that is not `pop()` taking the irregular path and `k ∈ (i,
-  j]`. Then we have `view_beginning(S_i)[bottom] < Timestamp(WF_k) <= Timestamp(WF_j) <=
-  view_ending(S_j)[bottom]`, and by `(VIEW-LOC)`, the conclusion follows.
+Let `O_k` be such an owner invocation that the values `S_i` read from `bottom` at
+`'L403` is written by `O_k`. Then by the construction of
+the linearization order, for all `l ∈ (i, k]`, `O_l` is an irregular `pop()`.
+
+If `k < j`, then `view_begin(S)[bottom] <= Timestamp(WL_k) < Timestamp(WF_j) <=
+view_end(O_j)[bottom]`. So by `(VIEW-LOC)`, the conclusion follows.
+
+Now suppose `j ∈ (i, k]`. Let `x` and `y` be the values `O_j` read from `bottom` at
+`'L201` and `top` at `'L204`, respectively.
+Since all the owner invocations between `j` and `k` are irregular `pop()`'s,
+`O_k` also read `x` from `bottom` at `'L201`.
+By `COROLLARY of (IRREGULAR-STEAL)`, `view_begin(S_i)[top] < TS[top = x-1]`.
+
+Also, by the fact that `O_j` is an irregular `pop()` and by `(IRREGULAR-TOP)`,
+`TS[top = x] <= view_end(O_j)[top]`.
+
+We have `view_begin(S_i)[top] < TS[top = x-1] <= view_end(S_j)[top]`.
+Thus by `(VIEW-LOC)`, the conclusion follows.
 
 #### Proof of `(VIEW-STEAL-INTRA-GROUP)`
 
@@ -754,7 +841,7 @@ prove for each case of `I_i`.
   write to `bottom` at `'L110` to `I_i`'s read from `bottom` at `'L403`. Thus we have `w <= y`
   because `I_i` reads `top = y` once more at `'L407`, `WB_(l+1)` is coherence-after-or `WB_(k+1)`,
   and the value `v` that `O_k` wrote to the buffer at `'L109` should be acknowledged by `I_i` at
-  `'L406`. Also, we have `view_beginning(O_k) <= view_end(I_i)`, as required by `(SYNC)`.
+  `'L406`. Also, we have `view_begin(O_k) <= view_end(I_i)`, as required by `(SYNC)`.
 
   + Case `l <= k`.
 
