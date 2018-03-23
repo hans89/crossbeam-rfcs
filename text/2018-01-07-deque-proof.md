@@ -587,27 +587,47 @@ We have `view_begin(S_i)[top] < TS[top = x-1] <= view_end(S_j)[top]`.
 Thus by `(VIEW-LOC)`, the conclusion follows.
 
 #### Proof of `(VIEW-STEAL-INTRA-GROUP)`
+> For all `i` and `S, S' ∈ G_i`, if `S` is ordered before `S'`, then `NOT (S' <V S)`.
 
 - Case 1: `S, S' ∈ STEAL`.
 
-  Suppose `S` read the value `y` from `top` at `'L401`, and `S'` read the value `w` from `top` at
-  `'L401`. By the construction, `y < w`. By `(VIEW-LOC)`, the conclusion follows.
+  Suppose, at `'L401`,  `S` and `S'` reads the value `y` and `w` from `top` respectively. So `S` is `STEAL_y` and `S'` is `STEAL_w`.
+  By construction, `y < w`.
+  So  `view_begin(S)[top] <= TS[top = y] < TS[top = w] <= view_end(S')[top]`.
+  By `(VIEW-LOC)`, the conclusion follows.
 
 - Case 2: `S, S' ∈ STEAL_EMPTY`. Obvious from the construction.
 
 - Case 3: `S ∈ STEAL` and `S' ∈ STEAL_EMPTY`.
 
-  Let `b` be the value of `WL_i`; `x` and `x'` be the values `S` and `S'` read from `bottom` at
-  `'L404`, respectively; and `y` and `y'` be the values `S` and `S'` read from `top` at `'L401`,
-  respectively. Since `S ∈ STEAL`, we have `y < x` from the condition at `'L404`. Since `S' ∈
-  STEAL_EMPTY`, we have `x' <= y'`.
+  Let `y` and `y'` be the values `S` and `S'` read from `top` at `'L401`.
+  If we can show that `y < y'`, then, by `(TOP-INCREASING)`,
+  `view_begin(S)[top] <= TS[top = y] < TS[top = y'] <= view_end(S')[top]`.
+  By `(VIEW-LOC)`, the conclusion follows.
 
-  If `S` read from `bottom` a value written by `O_i`, then we have `y < x = b = x' <=
-  y'`. Otherwise, then `S` read from `bottom` a value written by `O_j` for some `j > i`, and for all
-  `k ∈ (i, j]`, `O_k` is `pop()` taking the irregular path. By `(IRREGULAR-STEAL)`, we have `y+1 <
-  b`. By the definition of `push()` and `pop()`, we have `b-1 <= x'`, and thus `y <= b-2 < b-1 <= x'
-  <= y'`. In either case, we have `y < y'`, and by `(VIEW-LOC)`, the conclusion follows.
+  So we set out to show `y < y'`.
 
+  Additionally, let `b` be the value of `WL_i`; `x` and `x'` be the values `S`
+  and `S'` read from `bottom` at `'L404`, respectively.
+  Since `S ∈ STEAL`, we have `y < x` from the condition at `'L404`.
+  Since `S' ∈ STEAL_EMPTY`, we have `x' <= y'`.
+
+  Since `S ∈ G_i`, `O_i` is not an irregular `pop()`, it only writes once to `bottom` with value `b`. Since `S'` reads from `bottom` a value written
+  by `O_i`, `x' = b`.
+
+  If `S` reads from `bottom` a value written by `O_i`, `x = b = x'`.
+  Then we have `y < x = x' <= y'`.
+
+  Otherwise, `S` reads from `bottom` a value written by `O_j` for some `j > i`,
+  and for all `k ∈ (i, j]`, `O_k` is an irregular `pop()`.
+  Since any `O_k` where `k ∈ (i, j]` is an irregular `pop()`,
+  it only reads from `bottom` the value `b` at `'L201`, decreases `bottom`
+  to `b-1` at `'L202` and then sets in back to `b` at `'L207` or `'L216`.
+  So `O_j` writes values `b` and `b-1` to `bottom`, thus `x = b or x = b-1`.
+  Additionally, by `(IRREGULAR-STEAL)` for `S` and `O_j`, we have `y+1 < b`.
+  Thus `y < x <= b = x' <= y'`.
+
+- Case 4: `S ∈ STEAL_EMPTY` and `S' ∈ STEAL`. Impossible from the construction.
 
 ## Proof of `(SEQ)` and `(SYNC)`
 
