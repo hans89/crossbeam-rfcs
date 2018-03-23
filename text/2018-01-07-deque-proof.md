@@ -408,7 +408,7 @@ such that `v1[l] < v2[l]`.
 ### Auxiliary Lemmas
 
 - > (VIEW-LOC): If `view_begin(I)[loc] < view_end(J)[loc]` for some `loc`,
-then `NOT (J <V I)`.
+then `¬ (J <V I)`.
 
   Trivial. Suppose `J <V I`, then `view_end(J) < view_begin(I)`.
   So `view_end(J)[loc] <= view_begin(I)[loc] < view_end(J)[loc]`.
@@ -507,29 +507,29 @@ Then `y < x` holds.
 
 For `(VIEW)`, it is sufficient to prove that:
 
-1. `(VIEW-OWNER-STEAL)`: for all `i <= j` and `S ∈ G_j`, then `NOT (S <V O_i)`.
-2. `(VIEW-STEAL-OWNER)`: for all `i < j` and `S ∈ G_i`, then `NOT (O_j <V S)`.
+1. `(VIEW-OWNER-STEAL)`: for all `i <= j` and `S ∈ G_j`, then `¬ (S <V O_i)`.
+2. `(VIEW-STEAL-OWNER)`: for all `i < j` and `S ∈ G_i`, then `¬ (O_j <V S)`.
 3. `(VIEW-STEAL-INTER-GROUP)`: for all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`,
-    then `NOT (S_j <V S_i)`.
+    then `¬ (S_j <V S_i)`.
 4. `(VIEW-STEAL-INTRA-GROUP)`: for all `i` and `S, S' ∈ G_i`, if `S` is ordered
-    before `S'`, then `NOT (S' <V S)`.
+    before `S'`, then `¬ (S' <V S)`.
 
 Note that what would be `(VIEW-OWNER-OWNER)` is obvious from the fact that `{O_i}`
 is sorted according to the program order.
 
 #### Proof of `(VIEW-OWNER-STEAL)`
 
-> For all `i <= j` and `S ∈ G_j`, then `NOT (S <V O_i)`.
+> For all `i <= j` and `S ∈ G_j`, then `¬ (S <V O_i)`.
 
 Since `O_i` writes `WF_i`, we have `view_begin(O_i)[bottom] < Timestamp(WF_i)`.
 Furthermore, since the value `S` read from `bottom` is coherence-after-or `WF_j`,
 we have `Timestamp(WF_j) <= view_end(S)[bottom]`. Thus
 `view_begin(O_i)[bottom] < Timestamp(WF_i) <= Timestamp(WF_j) <= view_end(S)[bottom]`.
-So by `(VIEW-LOC)`, `NOT (S <V O_i)`.
+So by `(VIEW-LOC)`, `¬ (S <V O_i)`.
 
 #### Proof of `(VIEW-STEAL-OWNER)`
 
-> For all `i < j` and `S ∈ G_i`, then `NOT (O_j <V S)`.
+> For all `i < j` and `S ∈ G_i`, then `¬ (O_j <V S)`.
 
 If `S` returns `EMPTY`, then `S` reads from `O_i`. So
 `view_begin(S)[bottom] <= Timestamp(WL_i) < Timestamp(WL_j) <= view_end(O_j)[bottom]`.
@@ -556,7 +556,7 @@ Thus by `(VIEW-LOC)`, the conclusion follows.
 
 #### Proof of `(VIEW-STEAL-INTER-GROUP)`
 
-> For all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`, then `NOT (S_j <V S_i)`.
+> For all `i < j`, `S_i ∈ G_i` and `S_j ∈ G_j`, then `¬ (S_j <V S_i)`.
 
 Since `S_j` reading `bottom` is coherence-after-or `WF_j`, we have `Timestamp(WF_j) <= view_end(S_j)[bottom]`.
 
@@ -587,7 +587,7 @@ We have `view_begin(S_i)[top] < TS[top = x-1] <= view_end(S_j)[top]`.
 Thus by `(VIEW-LOC)`, the conclusion follows.
 
 #### Proof of `(VIEW-STEAL-INTRA-GROUP)`
-> For all `i` and `S, S' ∈ G_i`, if `S` is ordered before `S'`, then `NOT (S' <V S)`.
+> For all `i` and `S, S' ∈ G_i`, if `S` is ordered before `S'`, then `¬ (S' <V S)`.
 
 - Case 1: `S, S' ∈ STEAL`.
 
@@ -622,10 +622,10 @@ Thus by `(VIEW-LOC)`, the conclusion follows.
   and for all `k ∈ (i, j]`, `O_k` is an irregular `pop()`.
   Since any `O_k` where `k ∈ (i, j]` is an irregular `pop()`,
   it only reads from `bottom` the value `b` at `'L201`, decreases `bottom`
-  to `b-1` at `'L202` and then sets in back to `b` at `'L207` or `'L216`.
-  So `O_j` writes values `b` and `b-1` to `bottom`, thus `x = b or x = b-1`.
-  Additionally, by `(IRREGULAR-STEAL)` for `S` and `O_j`, we have `y+1 < b`.
-  Thus `y < x <= b = x' <= y'`.
+  to `b-1` at `'L202` and then sets it back to `b` at `'L207` or `'L216`.
+  So `O_j` reads `b` from `bottom` at `'L201`.
+  By `(IRREGULAR-STEAL)` for `S` and `O_j`, we have `y+1 < b`.
+  Thus `y < b - 1 < b = x' <= y'`.
 
 - Case 4: `S ∈ STEAL_EMPTY` and `S' ∈ STEAL`. Impossible from the construction.
 
