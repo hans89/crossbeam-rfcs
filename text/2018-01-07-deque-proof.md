@@ -580,10 +580,10 @@ Since all the owner invocations between `j` and `k` are irregular `pop()`'s,
 `O_k` also read `x` from `bottom` at `'L201`.
 By `COROLLARY of (IRREGULAR-STEAL)`, `view_begin(S_i)[top] < TS[top = x-1]`.
 
-Now note that `S_j` reads from `O_j`, which is an irregular `pop()`, and `S_j ∈ O_j`,
-so `S_j` must be `STEAL_EMPTY`. So, by the condition at `'L404`, `S_j` reads from
-`top` a value `>= x or x-1` (`O_j` writes `x-1` and `x` since it's irregular).
-Thus `TS[top = x-1] <= <= view_end(S_j)[top]`.
+Now note that `S_j ∈ O_j`, which is an irregular `pop()`, so `S_j` must be
+`STEAL_EMPTY` and `S_j` reads from `O_j`. So, by the condition at `'L404`,
+`S_j` reads from `top` a value `>= x or x-1` (`O_j` writes `x-1` and `x` since
+it's irregular). Thus `TS[top = x-1] <= <= view_end(S_j)[top]`.
 
 We have `view_begin(S_i)[top] < TS[top = x-1] <= view_end(S_j)[top]`.
 By `(VIEW-LOC)`, the conclusion follows.
