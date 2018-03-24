@@ -568,11 +568,11 @@ Now suppose `S_i` returns a value. This is now very similar to the subproof of
 `(VIEW-STEAL-OWNER)`.
 
 Let `O_k` be such an owner invocation that the values `S_i` read from `bottom` at
-`'L403` is written by `O_k`. Then by the construction of
+`'L403` is written by `O_k`---`i < k`. Then by the construction of
 the linearization order, for all `l ∈ (i, k]`, `O_l` is an irregular `pop()`.
 
 If `k < j`, then `view_begin(S)[bottom] <= Timestamp(WL_k) < Timestamp(WF_j) <=
-view_end(O_j)[bottom]`. So by `(VIEW-LOC)`, the conclusion follows.
+view_end(S_j)[bottom]`. So by `(VIEW-LOC)`, the conclusion follows.
 
 Now suppose `j ∈ (i, k]`. Let `x` and `y` be the values `O_j` read from `bottom` at
 `'L201` and `top` at `'L204`, respectively.
