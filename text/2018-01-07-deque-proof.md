@@ -633,24 +633,49 @@ By `(VIEW-LOC)`, the conclusion follows.
 
 ## Proof of `(SEQ)` and `(SYNC)`
 
-Let `I_0`, ..., `I_(n-1)` be the invocations sorted according to the constructed linearization
-order. In addition to `(SEQ)` and `(SYNC)`, we will simultaneously prove the following conditions
-with the same existentially quantified values of `t_i`, `b_i`, `A_i`:
+Let `I_0`, ..., `I_(n-1)` be the invocations sorted according to the constructed
+linearization order. In addition to `(SEQ)` and `(SYNC)`, we will simultaneously
+prove 3 other conditions called `(BOTTOM)`, `(TOP)`, and `(CONTENTS)`.
 
-> `(BOTTOM)`: If `I_i` is an owner invocation, then `b_i` equals to the value `I_i` read from
-> `bottom` at `'L101` or `'L201`.
+We summary the lemma as follows:
+> For all `i < n`,
 >
-> `(TOP)`: In `I_0`, ..., `I_(i-1)`, there are `t_i` invocations that succeed in updating `top`. Let
-> `T_0`, ..., `T_((t_i)-1)` be such invocations, sorted according to the order in `I`. Then `T_x`
-> updates `top` from `x` to `x+1`.
+> `(SEQ)` :
+> * If `I_i` is regular `pop()` returning `v`, then `t_i < b_i` and `A_i[b_i-1] = v`.
+> * If `I_i` is irregular `pop()` returning `v`, then `t_i < b_i` and `A_i[t_i] = v`.
+> * If `I_i` is irregular `pop()` returning `Empty`, then `¬ t_i < b_i`.
+> * If `I_i` is `push()` with value `v`, nothing needs to be proven.
+> * If `I_i` is `steal()` returning `v`, then `t_i < b_i` and `A_i[t_i] = v`.
+> * If `I_i` is `steal()` returning `Empty`, then `¬ t_i < b_i`.
 >
-> `(CONTENTS)`: for all `x ∈ [t_i, b_i)`, there exists a `push()` invocation into `x` in `I_0, ...,
-> I_(i-1)`; and `A_i[x]` is the value inserted by the last such invocation.
+> `(SYNC)` : If `I_i` is is `steal()` returning `v`, then there exists a `j < i`
+such that `I_j` is the last `push()` at `t_i` with value `v` and
+`view_begin(I_j) <= view_end(I_i)`.
+>
+> `(BOTTOM)`: If `I_i` is an owner invocation, then `b_i` equals to the value `I_i`
+read from `bottom` at `'L101` or `'L201`.
+>
+> `(TOP)`: There are `t_i` invocations in `I_0`, ..., `I_(i-1)` that updates `top`.
+> Let `T_0`, ..., `T_((t_i)-1)` be such invocations, sorted according to the order in `I`.
+> Then `T_x` updates `top` from `x` to `x+1`.
+>
+> `(CONTENTS)`: for all `x ∈ [t_i, b_i)`, there exists a `push()` invocation into `x`
+> in `I_0, ..., I_(i-1)`; and `A_i[x]` is the value inserted by the last such invocation.
 
-We prove that `{I_i}` satisfies `(SEQ)`, `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` by
-induction on `n`: suppose `I_0`, ..., `I_(i-1)` satisfies those conditions, and let's prove that
-there exists `b_(i+1)`, `t_(i+1)`, and `A_(i+1)` such that `I_i` also satisfies those conditions. We
-prove for each case of `I_i`.
+We prove that `I_i` satisfies `(SEQ)`, `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` by
+induction on `i`:
+* `I_0` satisfies these conditions.
+* If `I_0`, ..., `I_(i-1)` satisfy these conditions, then `I_i` also satisfies them.
+
+For `I_0`, first note that `top` is at least `0`. Since owner is the only one writes
+to `bottom`, if `I_0` an owner invocation it must read `0` from `bottom`, thus it
+must be either `push()` or `pop()` returning `Empty`. If `I_0` is a `steal()`
+that appears before any owner invocations in the linearization order, then
+`I_0 ∈ G_(-1)`, and `I_0` reads `0` from `bottom`, thus it must return `Empty`.
+In any case, it is trivial to show `¬ t_0 < b_0`, since `t_0 = b_0 = 0`.
+`(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` are trivially true.
+
+### WIP: fix inductive case
 
 - Case 1: `I_i` is `push()`.
 
