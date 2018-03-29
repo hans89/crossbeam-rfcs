@@ -690,10 +690,15 @@ We show that the value written by `WL_j` is `b_i`.
 
 - By induction, `I_j` satisfies `(BOTTOM)`, thus reads `b_j` from `bottom`.
 - By induction, for all `k ∈ [j,i)`, `I_k` satisfies `SEQ`. This means that
-  `I_j` writes the value `b_(j+1)` at `WL_j`, and for all `k ∈ (j,i)`, `I_k`
-  being `steal()` invocations does not change `bottom` and keep `b_(k+1) = b_k`.
+  `I_j` writes the value `b_(j+1)` at `WL_j`, and for all `k ∈ (j,i)`, `I_k`,
+  being a `steal()` invocation, does not change `bottom` and keep `b_(k+1) = b_k`.
 
-So `b_i` = `b_j+1` = the value written by `WL_j` =  the value read by `I_i`.
+So `b_i` = `b_(j+1)` = the value written by `WL_j` =  the value read by `I_i`.
+
+**Note**: we understand that the proof may sound confusing. The intent here is to
+show that the actual "physical" values read and written by `I_i` match the
+"logical" values of the sequential specification, which are described by the
+translation relation.
 
 #### WIP: Proof of others
 
