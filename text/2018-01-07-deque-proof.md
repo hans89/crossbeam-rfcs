@@ -691,7 +691,8 @@ We show that the value written by `WL_j` is `b_i`.
 - By induction, `I_j` satisfies `(BOTTOM)`, thus reads `b_j` from `bottom`.
 - By induction, for all `k ∈ [j,i)`, `I_k` satisfies `SEQ`. This means that
   `I_j` writes the value `b_(j+1)` at `WL_j`, and for all `k ∈ (j,i)`, `I_k`,
-  being a `steal()` invocation, does not change `bottom` and keep `b_(k+1) = b_k`.
+  being a `steal()` invocation, does not change `bottom` and the translation relations
+  keep `b_(k+1) = b_k`.
 
 So `b_i` = `b_(j+1)` = the value written by `WL_j` =  the value read by `I_i`.
 
@@ -700,9 +701,30 @@ show that the actual "physical" values read and written by `I_i` match the
 "logical" values of the sequential specification, which are described by the
 translation relation.
 
-#### WIP: Proof of others
+#### Proof of `(TOP)`
 
-- Case 1: `I_i` is `push()`.
+We prove `(TOP)` separately. The intuition is that `top` is only written by
+CASes in fetch-and-increment style.
+
+We prove `(TOP)` holds for `I_i` assuming `(TOP)` and `(SEQ)` hold for `I_j`
+where `j < i` (the inductive hypothesis).
+
+We consider `I_(i-1)`. By induction, there are `t_(i-1)` invocations
+that updates top in `I_0, ..., I_(i-2)`, where the last one `I_j` updates
+`top` from `t_(i-1)-1` to `t_(i-1)`.
+
+Since nothing in between `j` and `i-1` updates `top`, if `I_(i-1)` not a `steal()`
+or a irregular `pop()` returning some value, then `t_i = t_(i-1)` and the
+conclusion follows.
+
+Suppose that `I_(i-1)` is a `steal()` or an irregular `pop()` returning some value
+`v`. In order to get the conclusion, we must show that `I_(i-1)` updates `top` from `t_(i-1)` to `t_(i-1) + 1 = t_i`.
+
+
+#### WIP: Proof of `(SEQ)`, `(SYNC)`, `(TOP)`, and `(CONTENTS)`
+
+- Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
+  `(TOP)` follows from induction since `push()` does not change `top` and
 
   Quite obvious.
 
