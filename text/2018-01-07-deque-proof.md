@@ -662,20 +662,40 @@ read from `bottom` at `'L101` or `'L201`.
 > `(CONTENTS)`: for all `x ∈ [t_i, b_i)`, there exists a `push()` invocation into `x`
 > in `I_0, ..., I_(i-1)`; and `A_i[x]` is the value inserted by the last such invocation.
 
-We prove that `I_i` satisfies `(SEQ)`, `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` by
-induction on `i`:
+We prove that `I_i` satisfies `(SEQ)`, `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)`
+by strong induction on `i`:
 * `I_0` satisfies these conditions.
-* If `I_0`, ..., `I_(i-1)` satisfy these conditions, then `I_i` also satisfies them.
+* If for all `j < i`, `I_j` satisfy these conditions, then `I_i` also satisfies them.
 
+### Base case
 For `I_0`, first note that `top` is at least `0`. Since owner is the only one writes
 to `bottom`, if `I_0` an owner invocation it must read `0` from `bottom`, thus it
 must be either `push()` or `pop()` returning `Empty`. If `I_0` is a `steal()`
 that appears before any owner invocations in the linearization order, then
 `I_0 ∈ G_(-1)`, and `I_0` reads `0` from `bottom`, thus it must return `Empty`.
-In any case, it is trivial to show `¬ t_0 < b_0`, since `t_0 = b_0 = 0`.
+In any case, for `(SEQ)` it is trivial to show `¬ t_0 < b_0`, since `t_0 = b_0 = 0`.
 `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` are trivially true.
 
-### WIP: fix inductive case
+### Inductive case
+
+#### Proof of `(BOTTOM)`
+
+We prove `(BOTTOM)` separately. The intuition of the proof is that only owner
+invocations write to `bottom`, and that owner invocations synchronize,
+and that they are ordered in `I` by the order of actual execution.
+
+When `I_i` is an owner invocation, it reads the value written by `WL_j` from
+`bottom` where `I_j` is the latest owner invocation before `I_i` (`j < i`).
+We show that the value written by `WL_j` is `b_i`.
+
+- By induction, `I_j` satisfies `(BOTTOM)`, thus reads `b_j` from `bottom`.
+- By induction, for all `k ∈ [j,i)`, `I_k` satisfies `SEQ`. This means that
+  `I_j` writes the value `b_(j+1)` at `WL_j`, and for all `k ∈ (j,i)`, `I_k`
+  being `steal()` invocations does not change `bottom` and keep `b_(k+1) = b_k`.
+
+So `b_i` = `b_j+1` = the value written by `WL_j` =  the value read by `I_i`.
+
+#### WIP: Proof of others
 
 - Case 1: `I_i` is `push()`.
 
