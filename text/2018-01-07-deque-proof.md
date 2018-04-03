@@ -726,9 +726,13 @@ To show `t = t_(i-1)`, we derive contradiction if `t < t_(i-1)` or `t > t_(i-1)`
 update, and since `t < t_(i-1)` the one that updates `top` from `t` to `t+1`
 must be in `I_0, ..., I_(i-2)`.
 
-Now suppose that `t > t_(i-1)`.
+Now suppose that `t > t_(i-1)`. Then there must by an `I_k` that updates `top`
+from `t_k` to `t_k+1` and `t_(i-1) <= t_k < t`. We show that `I_k` is ordered
+before `I_(i-1)` in the linearization order, which means that `I_k` is in
+`I_0, ..., I_(i-2)`, thus by induction `t_k < t_(i-1)`, thus contradiction.
 
 - Case : `I_i` is an irregular `pop()` returning a value `v`.
+
 #### WIP: Proof of `(SEQ)`, `(SYNC)`, `(TOP)`, and `(CONTENTS)`
 
 - Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
