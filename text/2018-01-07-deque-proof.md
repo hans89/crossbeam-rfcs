@@ -720,11 +720,18 @@ conclusion follows.
 Suppose that `I_(i-1)` is a `steal()` or an irregular `pop()` returning some value
 `v`. In order to get the conclusion, we must show that `I_(i-1)` updates `top` from `t_(i-1)` to `t_(i-1) + 1 = t_i`.
 
+Suppose that `I_(i-1)` updates `top` from `t` to `t+1`.
+To show `t = t_(i-1)`, we derive contradiction if `t < t_(i-1)` or `t > t_(i-1)`.
+`t < t_(i-1)` is impossible because for each value of `top` there is only one
+update, and since `t < t_(i-1)` the one that updates `top` from `t` to `t+1`
+must be in `I_0, ..., I_(i-2)`.
 
+Now suppose that `t > t_(i-1)`.
+
+- Case : `I_i` is an irregular `pop()` returning a value `v`.
 #### WIP: Proof of `(SEQ)`, `(SYNC)`, `(TOP)`, and `(CONTENTS)`
 
 - Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
-  `(TOP)` follows from induction since `push()` does not change `top` and
 
   Quite obvious.
 
