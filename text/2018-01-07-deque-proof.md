@@ -631,7 +631,7 @@ By `(VIEW-LOC)`, the conclusion follows.
 
 - Case 4: `S ∈ STEAL_EMPTY` and `S' ∈ STEAL`. Impossible from the construction.
 
-## Proof of `(SEQ)` and `(SYNC)`
+### Proof of `(SEQ)` and `(SYNC)`
 
 Let `I_0`, ..., `I_(n-1)` be the invocations sorted according to the constructed
 linearization order. In addition to `(SEQ)` and `(SYNC)`, we will simultaneously
@@ -667,7 +667,7 @@ by strong induction on `i`:
 * `I_0` satisfies these conditions.
 * If for all `j < i`, `I_j` satisfy these conditions, then `I_i` also satisfies them.
 
-### Base case
+#### Base case
 For `I_0`, first note that `top` is at least `0`. Since owner is the only one writes
 to `bottom`, if `I_0` an owner invocation it must read `0` from `bottom`, thus it
 must be either `push()` or `pop()` returning `Empty`. If `I_0` is a `steal()`
@@ -676,7 +676,7 @@ that appears before any owner invocations in the linearization order, then
 In any case, for `(SEQ)` it is trivial to show `¬ t_0 < b_0`, since `t_0 = b_0 = 0`.
 `(SYNC)`, `(BOTTOM)`, `(TOP)`, and `(CONTENTS)` are trivially true.
 
-### Inductive case
+#### Inductive case
 
 #### Proof of `(BOTTOM)`
 
