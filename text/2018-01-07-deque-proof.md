@@ -780,7 +780,7 @@ which means that `I_k` is in `I_0, ..., I_(i-2)`, thus by induction
 #### Proof of `(CONTENTS)`
 
 We also prove `(CONTENTS)` separately. We have the inductive hypothesis for
-`I_(i-1)`: for all `x ∈ [t_(i-1), b_(i-1)]`, there exists a `push()`
+`I_(i-1)`: for all `x ∈ [t_(i-1), b_(i-1))`, there exists a `push()`
 invocation into `x` in `I_0, ..., I_(i-2)`, and `A_(i-1)[x]` is the value
 last inserted by the last such invocation.
 
@@ -789,41 +789,47 @@ If `I_(i-1)` is not a `push()`, then the conclusion follows from the inductive
 hypothesis, since `t_(i-1) <= t_i` and `b_i = b_(i-1)` or `b_i = b_(i-1) - 1`.
 
 If `I_(i-1)` is a `push()`, then `b_i = b_(i-1) + 1` and `t_i = t_(i-1)`.
-For all `x ∈ [t_(i-1), b_(i-1)]` we use the inductive hypothesis.
-For `x = b_(i-1) + 1`, `A_(i+1)[x]` is the exact last value inserted.
+For all `x ∈ [t_(i-1), b_(i-1))` we use the inductive hypothesis.
+For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
 
 #### WIP: Proof of `(SEQ)` and `(SYNC)`
 
 - Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
 
-  Quite obvious.
-
 - Case 2: `I_i` is `pop()` taking the regular path.
 
-  Let `j` be such an index that `I_i = O_j`. Let `x` and `y` be the values `I_i` read from `bottom`
-  at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`, we have `x = b_i`. Since `I_i` is
-  taking the regular path, we have `y+2 <= x`. We also prove `t_i <= y+1`. Consider the invocation
-  `I` that writes `y+2` to `top`, if exists. (Otherwise, by `(TOP)`, `t_i <= y+1` should hold.) If
-  `I` is `pop()`, then `I` should be linearized after `I_i` thanks to the coherence of `top`; if `I`
-  is `steal()`, then by the synchronization of the seqcst-fences from `I_i` to `I` via `top`, the
-  value `I` read from `bottom` at `'L403` should be coherence-after-or `WL_j`. Thus `I` is
-  linearized after `I_i`, and by `(TOP)`, `t_i <= y+1` holds.
+  For `(SEQ)`, we need to prove that `t_i < b_i` and `I_i` returns `A_i[b_i - 1]`.
+  We have no obligations for `(SYNC)`.
 
-  Then we have `t_i <= y+1 < y+2 <= x = b_i`, and it is legit to pop a value from the `bottom` end
-  of the deque and decrease `bottom`.
+  Let `j` be such an index that `I_i = O_j`. Let `x` and `y` be the values `I_i`
+  read from `bottom` at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`,
+  we have `x = b_i`. Since `I_i` is taking the regular path, we have `y+2 <= x`.
+  We prove that `t_i <= y+1`, which gives us `t_i < y+2 <= x = b_i`.
 
-  Now we choose `b_(i+1) = b_i - 1`, `t_(i+1) = t_i`, and `A_(i+1) = A_i`, i.e. `I_i` pops a value
-  from the `bottom` end of the deque. It remains to prove that `I_i` returns the right value. Let
-  `O_k` be the last `push()` operation in `I_0`, ..., `I_(i-1)` that pushed to the index `x-1` and
-  writes `bottom = x`, and `v` be the value `O_k` pushed. Thanks to `(CONTENTS)`, it is sufficient
-  to prove that `I_i` returns `v`.
+  Suppose otherwise that `t_i >= y+2`, then by `(TOP)` the invocation `I` that
+  writes `y+2` to `top` must be in `I_0, ..., I_(i-1)`.
+  If `I` is `pop()`, then `I` should be linearized after `I_i` thanks to the
+  coherence of `top`, since `I_i` reads from `top` the value `y` smaller than
+  the value `y+1` read by `I`.
+  If `I` is `steal()`, then by the synchronization of the seqcst-fences from `I_i`
+  to `I` via `top`, the value `I` read from `bottom` at `'L403` should be coherence-after-or `WF_i`, this `I` should be ordered after `I_i`.
+  In both case `I` is linearized after `I_i`, thus contradiction.
 
-  For all `l`, let `WB_l` be the value of `buffer` at the beginning of the invocation `O_l`. Also,
-  for all `z`, let `WC_(l, z)` be the `z`-th contents of the buffer `WB_l` at the beginning of the
-  invocation `O_l`. These are well-defined since the pointer `buffer` and the contents of the buffer
+  It remains to prove that `I_i` returns the right value `A_i[b_i - 1]`.
+  Let `O_k` be the last `push()` operation in `I_0`, ..., `I_(i-1)` that pushed
+  to the index `b_i -1 = x-1` and writes `bottom = x`, and `v` be the value `O_k`
+  pushed. Thanks to `(CONTENTS)`, it is sufficient to prove that `I_i` returns `v`.
+
+  For all `l`, let `WB_l` be the value of `buffer` at the beginning of the
+  invocation `O_l`. Also, for all `z`, let `WC_(l, z)` be the `z`-th value of
+  the buffer `WB_l` at the beginning of the invocation `O_l`.
+  These are well-defined since the pointer `buffer` and the contents of the buffer
   are modified only by the owner.
 
-  Let's prove by induction that for all `l ∈ (k, j]`, `WC_(l, (x-1) % size(WB_l)) = v`. Since `O_k`
+  Let's prove by induction that for all `l ∈ (k, i]`,
+  `WC_(l, (x-1) % size(WB_l)) = v` --- that is, the element
+  `WC_(l, (x-1) % size(WB_l))` is not changed in between `O_k` and `I_i`.
+  Since `O_k`
   just pushed a value to the index `x-1`, it trivially holds for the base case `l = k+1`. Now
   suppose that it holds for `l = m` for some `m ∈ (k, j-1]` and prove that it holds for `l =
   m+1`. Since `O_k` is the last operation that writes `bottom = x` before `O_j` writes `bottom =
@@ -835,7 +841,7 @@ For `x = b_(i-1) + 1`, `A_(i+1)[x]` is the exact last value inserted.
 
   Thus `I_i = O_j` returns `WC_(j, (x-1) % size(WB_j))`, which equals to `v`.
 
-- Case 3: `I_i` is `pop()` taking the irregular path.
+- Case 3: `I_i` is an irregular `pop()`.
 
   Let `j` be such an index that `I_i = O_j`. Let `x` and `y` be the values `I_i` read from `bottom`
   at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`, we have `x = b_i`. Since `I_i` takes
