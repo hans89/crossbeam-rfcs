@@ -777,8 +777,22 @@ know that `I_k` is ordered before `I_(i-1)` in the linearization order,
 which means that `I_k` is in `I_0, ..., I_(i-2)`, thus by induction
 `t_k < t_(i-1)`, thus contradiction.
 
+#### Proof of `(CONTENTS)`
 
-#### WIP: Proof of `(SEQ)`, `(SYNC)`, and `(CONTENTS)`
+We also prove `(CONTENTS)` separately. We have the inductive hypothesis for
+`I_(i-1)`: for all `x ∈ [t_(i-1), b_(i-1)]`, there exists a `push()`
+invocation into `x` in `I_0, ..., I_(i-2)`, and `A_(i-1)[x]` is the value
+last inserted by the last such invocation.
+
+We prove `(CONTENTS)` for `I_i`.
+If `I_(i-1)` is not a `push()`, then the conclusion follows from the inductive
+hypothesis, since `t_(i-1) <= t_i` and `b_i = b_(i-1)` or `b_i = b_(i-1) - 1`.
+
+If `I_(i-1)` is a `push()`, then `b_i = b_(i-1) + 1` and `t_i = t_(i-1)`.
+For all `x ∈ [t_(i-1), b_(i-1)]` we use the inductive hypothesis.
+For `x = b_(i-1) + 1`, `A_(i+1)[x]` is the exact last value inserted.
+
+#### WIP: Proof of `(SEQ)` and `(SYNC)`
 
 - Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
 
