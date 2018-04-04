@@ -503,6 +503,51 @@ Then `y < x` holds.
     By `(IRREGULAR-STEAL)`, `S` writes some value `y < x` to `top`.
     By `(TOP-INCREASING)` and coherence, `view_begin(S)[top] < TS[top = x-1]`.
 
+- > (TOP-ORDERING) : If `I_i` udpates `top` from `t_i` to `t_i +1` and
+`I_j` from `t_j` to `t_j+1` and `t_i < t_j` then `I_i` is ordered before `I_j`
+in the linearization order.
+
+  Note that `I_i` reads `t_i` from `top` and writes `t_i+1 <= t_j`, which is the
+  value `I_j` reads from `top`.
+
+  + Case : both `I_i` and `I_j` are `pop()`. Since `I_j` reads from `top`
+  a value later than or equal to what `I_i` writes, and `pop()`'s are ordered by program order, `I_j` must be ordered after `I_i`.
+
+  + Case : both `I_i` and `I_j` are `steal()`. Then thanks to the synchronization
+    through `top` (with the release CAS and the SC fence and the acquire read),
+    the read of `bottom` at `'L403` by `I_i` happens before the same acquire read
+    by `I_j` at `'L403`. By coherence `I_i` reads from some owner invocation
+    `O_i` that is ordered before the owner invocation `O_j` reads by `I_j`.
+    This means that the `I_j`'s '`G` group is at least `I_i`'s `G` group.
+    If they happen to be the same, then because `I_i` stole `t_i < t_j`, `I_i`
+    is ordered before `I_j`. If the two `G` groups are not the same, then `I_i`
+    is definitely ordered before `I_j`.
+
+  + Case : `I_i` is `pop` and `I_j` is `steal()`. Due to the SC fence in
+    `pop()` (`'L203`), the update of `top` with CAS (`'L213`), the SC fence (`'L402`)
+    and acquire read of `bottom` (`'L403`) in `steal()`, the read at `'L403`
+    synchronizes with the write at `'L202`. So `I_j` must read from some owner
+    invocation `I_k` that is ordered after `I_i`. If there is an owner invocation
+    that is not an irregular `pop()` between `I_i` and `I_k` (including and `I_k`),
+    then `I_j)` is ordered after that invocation and thus after `I_k` and
+    we are done.
+
+    Suppose that all owner invocations between `I_i` and `I_k` are irregular `pop()`'s.
+    Then all of them except `I_i` must return `Empty`, and all of them read and
+    writes the same values to `bottom`. This means that `I_k` writes to `bottom` a
+    value `x <= t_i+1`. `I_j` reads from `bottom` that value
+    `x <= t_i < t_j` so it must also return `Empty`. Contradiction.
+
+  + Case : `I_i` is `steal()` and `I_j` is `pop()`. Suppose that `I_i` reads from
+    `bottom` a value written by an owner invocation `O_k`.
+
+    If `O_k` happens before `I_j`, or `O_k = I_j` then `I_i` is ordered before `I_j`.
+
+    Suppose that `I_j` happens before `O_k`, then `I_i` reading `bottom` at
+    `'L403` must have acquire `TS[top = t_j+1]`. By coherence `I_i`'s CAS
+    writes `t_i+1` with `TS[top=t_i+1] > TS[top=t_i+1]`. But `t_i < t_j`, and
+    this contradicts `(TOP-INCREASING)`.
+
 ### Proof of `(VIEW)`
 
 For `(VIEW)`, it is sufficient to prove that:
@@ -727,58 +772,10 @@ update, and since `t < t_(i-1)` the one that updates `top` from `t` to `t+1`
 must be in `I_0, ..., I_(i-2)`.
 
 Now suppose that `t > t_(i-1)`. Then there must be an `I_k` that updates `top`
-from `t_k` to `t_k+1` and `t_(i-1) <= t_k < t`. We show that `I_k` is ordered
-before `I_(i-1)` in the linearization order, which means that `I_k` is in
-`I_0, ..., I_(i-2)`, thus by induction `t_k < t_(i-1)`, thus contradiction.
-
-We show that if `I_k` updates `top` from `t_k` to `t_k+1` and `I_(i-1)` from `t`
-to `t+1` and `t_k < t` then `I_k` must be ordered before `I_(i-1)`, by the
-following lemma.
-
-> (TOP-ORDERING) : If `I_i` udpates `top` from `t_i` to `t_i +1` and
-`I_j` from `t_j` to `t_j+1` and `t_i < t_j` then `I_i` is ordered before `I_j`
-in the linearization order.
-
-Note that `I_i` reads `t_i` from `top` and writes `t_i+1 <= t_j`, which is the
-value `I_j` reads from `top`.
-
-- Case : both `I_i` and `I_j` are `pop()`. Since `I_j` reads from `top`
-a value later than or equal to what `I_i` writes, and `pop()`'s are ordered by program order, `I_j` must be ordered after `I_i`.
-
-- Case : both `I_i` and `I_j` are `steal()`. Then thanks to the synchronization
-  through `top` (with the release CAS and the SC fence and the acquire read),
-  the read of `bottom` at `'L403` by `I_i` happens before the same acquire read
-  by `I_j` at `'L403`. By coherence `I_i` reads from some owner invocation
-  `O_i` that is ordered before the owner invocation `O_j` reads by `I_j`.
-  This means that the `I_j`'s '`G` group is at least `I_i`'s `G` group.
-  If they happen to be the same, then because `I_i` stole `t_i < t_j`, `I_i`
-  is ordered before `I_j`. If the two `G` groups are not the same, then `I_i`
-  is definitely ordered before `I_j`.
-
-- Case : `I_i` is `pop` and `I_j` is `steal()`. Due to the SC fence in
-  `pop()` (`'L203`), the update of `top` with CAS (`'L213`), the SC fence (`'L402`)
-  and acquire read of `bottom` (`'L403`) in `steal()`, the read at `'L403`
-  synchronizes with the write at `'L202`. So `I_j` must read from some owner
-  invocation `I_k` that is ordered after `I_i`. If there is an owner invocation
-  that is not an irregular `pop()` between `I_i` and `I_k` (including and `I_k`),
-  then `I_j)` is ordered after that invocation and thus after `I_k` and
-  we are done.
-
-  Suppose that all owner invocations between `I_i` and `I_k` are irregular `pop()`'s.
-  Then all of them except `I_i` must return `Empty`, and all of them read and
-  writes the same values to `bottom`. This means that `I_k` writes to `bottom` a
-  value `x <= t_i+1`. `I_j` reads from `bottom` that value
-  `x <= t_i < t_j` so it must also return `Empty`. Contradiction.
-
-- Case : `I_i` is `steal()` and `I_j` is `pop()`. Suppose that `I_i` reads from
-  `bottom` a value written by an owner invocation `O_k`.
-
-  If `O_k` happens before `I_j`, or `O_k = I_j` then `I_i` is ordered before `I_j`.
-
-  Suppose that `I_j` happens before `O_k`, then `I_i` reading `bottom` at
-  `'L403` must have acquire `TS[top = t_j+1]`. By coherence `I_i`'s CAS
-  writes `t_i+1` with `TS[top=t_i+1] > TS[top=t_i+1]`. But `t_i < t_j`, and
-  this contradicts `(TOP-INCREASING)`.
+from `t_k` to `t_k+1` and `t_(i-1) <= t_k < t`. By `(TOP-ORDERING)`, we
+know that `I_k` is ordered before `I_(i-1)` in the linearization order,
+which means that `I_k` is in `I_0, ..., I_(i-2)`, thus by induction
+`t_k < t_(i-1)`, thus contradiction.
 
 
 #### WIP: Proof of `(SEQ)`, `(SYNC)`, and `(CONTENTS)`
