@@ -947,7 +947,10 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
     <!-- w b 2 -->
 
 
-- Case 4: `I_i` is `steal()` and it returns a value.
+- Case 4: `I_i` is `steal()` and it returns a value `v`.
+
+  For `(SEQ)`, we need to prove that `t_i < b_i` and `A_i[t_i] = v`. We
+  also need to prove `(SYNC)`.
 
   Let `x` and `y` be the values `I_i` read from `bottom` at `'L403` and `top` at `'L401`,
   respectively. Then either `x = b_i` or `x = (b_i)-1` holds by the construction of linearization
@@ -1060,20 +1063,22 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
   <!-- holds. -->
 
 
-- Case 5: `I_i` is `steal()` and it returns `EMPTY`.
+- Case 5: `I_i` is `steal()` and it returns `EMPTY`. We have no obligations
+  for `(SYNC)`.
 
-  Let `x` and `y` be the values `I_i` read from `bottom` at `'L403` and `top` at `'L401`,
-  respectively. Since `I_i` returns `EMPTY`, `x <= y` holds. Also, either `x = b_i` or `x = (b_i)-1`
-  holds by the construction of linearization order and the definition of `push()` and `pop()`.
+  For `(SEQ)`, we prove that `¬ t_i < b_i`, or `b_i <= t_i`.
 
-  It is sufficient to prove that `b_i <= t_i`, since then it will be legit to return `EMPTY` by
-  choosing `b_(i+1) = b_i`, `t_(i+1) = t_i`, and `A_(i+1) = A_i`.
+  Let `x` and `y` be the values `I_i` read from `bottom` at `'L403` and `top` at
+  `'L401`, respectively. Since `I_i` returns `EMPTY`, `x <= y` holds.
+  Also, either `x = b_i` or `x = (b_i)-1` holds by the construction of linearization
+  order, the definition of `push()` and `pop()`, and the inductive hypotheses of
+  `(SEQ)`.
 
-  + Case `x = b_i`.
+  + Case `x = b_i`. We prove `y <= t_i` as follows.
 
-    We prove `y <= t_i` as follows. Consider the invocation `I` that writes `y` to `top`. By
-    `(TOP)`, it is sufficient to prove that `I` is linearized before `I_i`. Suppose `I` is
-    `pop()`. Let `j` be such an index that `I = O_j`. Then there is a release-acquire
+    Consider the invocation `I` that writes `y` to `top`. By
+    `(TOP)`, it is sufficient to prove that `I` is linearized before `I_i`.
+    Suppose `I` is `pop()`. Then there is a release-acquire
     synchronization from `I`'s write to `top` at `'L213` and `I_i` read from `top` at `'L401-'L402`,
     and `x` should be coherence-after-or `WF_j`. Thus `I` should be linearized before `I_i`. If `I`
     is `steal()`, then by a release-acquire synchronization from `I`'s write to `top` at `'L407` to
