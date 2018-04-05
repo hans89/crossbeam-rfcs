@@ -687,7 +687,7 @@ We summary the lemma as follows:
 >
 > `(SEQ)` :
 > * If `I_i` is regular `pop()` returning `v`, then `t_i < b_i` and `A_i[b_i-1] = v`.
-> * If `I_i` is irregular `pop()` returning `v`, then `t_i < b_i` and `A_i[t_i] = v`.
+> * If `I_i` is irregular `pop()` returning `v`, then `t_i < b_i` and `A_i[t_i] = v`
 > * If `I_i` is irregular `pop()` returning `Empty`, then `¬ t_i < b_i`.
 > * If `I_i` is `push()` with value `v`, nothing needs to be proven.
 > * If `I_i` is `steal()` returning `v`, then `t_i < b_i` and `A_i[t_i] = v`.
@@ -818,7 +818,7 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
   Let `I_k` be the last `push()` operation in `I_0`, ..., `I_(i-1)` that pushed
   the value `v` to the index `b_i -1 = x-1` and writes `bottom = x`.
   Thanks to `(CONTENTS)`, it is sufficient to prove that `I_i` returns `v`.
-  The intuition is that the element at `x-1` is not changed by any owner
+  **Intuition**: the element at `x-1` is not changed by any owner
   invocation that is in between `I_k` and `I_i`.
 
   For all `l`, let `WB_l` be the value of `buffer` at the beginning of the
@@ -850,33 +850,36 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
 
   Thus `I_i` returns `WC_(i, (x-1) % size(WB_i))`, which equals `v`.
 
-- Case 3: `I_i` is an irregular `pop()`.
+- Case 3: `I_i` is an irregular `pop()`. We have no obligations for `(SYNC)`.
 
-  Let `j` be such an index that `I_i = O_j`. Let `x` and `y` be the values `I_i` read from `bottom`
-  at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`, we have `x = b_i`. Since `I_i` takes
-  the irregular path, we have `y >= x-1`.
+  Let `x` and `y` be the values `I_i` read from `bottom`
+  at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`, we have `x = b_i`.
+  Since `I_i` takes the irregular path, we have `y >= x-1`.
 
-  + Case `y >= x`, or [`y = x-1` and the CAS at `'L213` fails].
+  + Case `y >= x` or [`y = x-1` and the CAS at `'L213` fails],
+    `I_i` returns `Empty`.
 
-    If the former is the case, then `I_i` writes `bottom = x` at `'L208`. If the latter is the case,
-    then `I_i` read from `top` a value `>= x` at `'L213`, and then writes `bottom = x` at
-    `'L216`. In either case, it reads `top >= x` and then writes `bottom = x`.
+    In the former case,  `I_i` writes `bottom = x` at `'L216`.
+    In the latter case, `I_i` reads from `top` a value `> y`, thus `>= x` at `'L213`,
+    and then writes `bottom = x` at `'L216`.
 
-    We prove `x <= t_i` as follows. Consider the invocation `I` that writes `x` to `top`. By
-    `(TOP)`, it is sufficient to prove that `I` is linearized before `I_i`. If `I` is `pop()`, then
-    it is so thanks to the coherence of `top`. Now suppose `I` is `steal()`. Let `O_k` be the first
-    `push()` invocation in `O_(j+1)`, ..., `O_(o-1)`. (If no such invocation exists, let `k =
-    o`. Also recall that `o` is the number of owner's method invocations.)  By the coherence of
-    `top`, all of `O_j`, ..., `O_(k-1)` should read `top >= x` at `'L204`, and take the irregular
-    path. Thus it is sufficient to prove that the value `I` read from `bottom` at `'L403` should be
-    coherence-before `WF_k`. Suppose otherwise. Then there is a release-acquire synchronization from
-    `WF_k` to `I`'s read from `bottom` at `'L403`, so `O_j`'s read from `top` at `'L204` or `'L213`
-    is coherence-before `I`'s write to `top` at `'L407`. But this is impossible due to the coherence
-    of `top`.
+    We need to prove `¬ t_i < b_i`, or `b_i = x <= t_i`.
+    We prove `x <= t_i` as follows. Consider the invocation `I` that writes `x`
+    to `top`. By `(TOP)`, it is sufficient to prove that `I` is linearized before
+    `I_i`. If `I` is `pop()`, then it is so thanks to the coherence of `top`.
 
-    Thus we have `b_i = x <= t_i`, and `I_i` goes to `'L207`, restores the original value of
-    `bottom`, and returns `EMPTY`. We choose `b_(i+1) = b_i`, `t_(i+1) = t_i`, and `A_(i+1) = A_i`,
-    i.e. the deque is empty.
+    Now suppose `I` is `steal()`.
+    Let `I_k` be the first `push()` after `I_i` (If no such invocation exists,
+    let `I_k` be the last owner invocation.)
+    All owner invocations in `I_i`, ... `I_(k-1)` are irregular `pop()`'s,
+    and by coherence of `top` should read a value `>= x` at `'L204`.
+    Thus to prove that `I` is ordered before `I_i`, it suffices to prove that
+    `I` reads from `bottom` at `'L403` a value that is coherence-before `WF_k`.
+    Suppose otherwise. Then there is a release-acquire synchronization from
+    `WF_k` to `I`'s read from `bottom` at `'L403`. So `I_i`'s read from `top` at
+    `'L204` or `'L213` is coherence-before `WF-k` and transitively coherence-before
+    `I`'s write to `top` at `'L407`. But this is impossible since `I_i` reads
+    from the write to `top` of `I`.
 
     <!-- [I] -->
     <!-- R t x-1 -->
@@ -893,22 +896,18 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
 
   + Case `y = x-1` and the CAS at `'L213` succeeds.
 
-    `I_i` updates `top` from `x-1` to `x` at `'L213` and writes `bottom = x` at `'L216`. Let's prove
-    that `x-1 <= t_i`. Consider the invocation `I` that writes `x-1` to `top`. By `(TOP)`, it is
-    sufficient to prove that `I` is linearized before `I_i`. If `I` is `pop()`, then it is so thanks
-    to the coherence of `top`. Now suppose `I` is `steal()`. Let `O_k` be the first `push()`
-    invocation in `O_(j+1)`, ..., `O_(o-1)`. (If no such invocation exists, let `k = o`.) By the
-    coherence of `top`, all of `O_j`, ..., `O_(k-1)` should be `pop()` taking the irregular
-    path. Thus it is sufficient to prove that the value `I` read from `bottom` at `'L403` should be
-    coherence-before `WF_k`. Suppose otherwise. Then there is a release-acquire synchronization from
-    `WF_k` to `I`'s read from `bottom` at `'L403`, so `O_j`'s update of `top` from `x-1` to `x` at
-    `'L213` is coherence-before `I`'s write to `top` at `'L407`. But this is impossible due to the
-    coherence of `top`.
+    `I_i` updates `top` from `x-1` to `x` at `'L213` and writes `bottom = x` at
+    `'L216`. For `(SEQ)` we need to prove  `t_i < b_i` and `I_i` returns `A_i[t_i]`.
 
-    From `x-1 <= t_i` and the fact that `I_i` writes `x` to `top`, we have `t_i = x-1`, and thus
-    `t_i = x-1 = (b_i)-1`. We choose `b_(i+1) = b_i`, `t_(i+1) = t_i + 1`, and `A_(i+1) = A_i`,
-    i.e. `I_i` pops the value from the `bottom` end of the deque and increases `top`. It remains to
-    prove that `I_i` returns the right value, which is so for roughly the same reason above.
+    We prove that `x-1 <= t_i`.
+    Consider the invocation `I` that writes `x-1` to `top`. By `(TOP)`, it
+    suffices to prove that `I` is linearized before `I_i`.
+    This follows from `(TOP-ORDERING)` since `I` writes `x-1` and
+    `I_i` writes `x`.
+    From `x-1 <= t_i` and the fact that `I_i` writes `x` to `top`, we have `t_i = x-1`, and thus `t_i = b_i - 1 < b_i`.
+
+    It remains to prove that `I_i` returns the right value, which is so for
+    roughly the same reason as Case 2 (Proof omitted).
 
     <!-- r t x-2 -->
     <!-- ------- -->
