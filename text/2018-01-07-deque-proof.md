@@ -796,12 +796,11 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
 
 - Case 1: `I_i` is `push()`. We have no obligations for `(SEQ)` and `(SYNC)`.
 
-- Case 2: `I_i` is `pop()` taking the regular path.
+- Case 2: `I_i` is a regular `pop()`. We have no obligations for `(SYNC)`.
 
   For `(SEQ)`, we need to prove that `t_i < b_i` and `I_i` returns `A_i[b_i - 1]`.
-  We have no obligations for `(SYNC)`.
 
-  Let `j` be such an index that `I_i = O_j`. Let `x` and `y` be the values `I_i`
+  Let `x` and `y` be the values `I_i`
   read from `bottom` at `'L201` and `top` at `'L204`, respectively. By `(BOTTOM)`,
   we have `x = b_i`. Since `I_i` is taking the regular path, we have `y+2 <= x`.
   We prove that `t_i <= y+1`, which gives us `t_i < y+2 <= x = b_i`.
@@ -816,30 +815,40 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
   In both case `I` is linearized after `I_i`, thus contradiction.
 
   It remains to prove that `I_i` returns the right value `A_i[b_i - 1]`.
-  Let `O_k` be the last `push()` operation in `I_0`, ..., `I_(i-1)` that pushed
-  to the index `b_i -1 = x-1` and writes `bottom = x`, and `v` be the value `O_k`
-  pushed. Thanks to `(CONTENTS)`, it is sufficient to prove that `I_i` returns `v`.
+  Let `I_k` be the last `push()` operation in `I_0`, ..., `I_(i-1)` that pushed
+  the value `v` to the index `b_i -1 = x-1` and writes `bottom = x`.
+  Thanks to `(CONTENTS)`, it is sufficient to prove that `I_i` returns `v`.
+  The intuition is that the element at `x-1` is not changed by any owner
+  invocation that is in between `I_k` and `I_i`.
 
   For all `l`, let `WB_l` be the value of `buffer` at the beginning of the
-  invocation `O_l`. Also, for all `z`, let `WC_(l, z)` be the `z`-th value of
-  the buffer `WB_l` at the beginning of the invocation `O_l`.
-  These are well-defined since the pointer `buffer` and the contents of the buffer
-  are modified only by the owner.
+  owner invocation `I_l`. Also, for all `z`, let `WC_(l, z)` be the `z`-th value
+  of the buffer `WB_l` at the beginning of the owner invocation `I_l`.
+  These are well-defined since the pointer `buffer` and the contents of
+  the buffer are modified exclusively by the owner.
 
-  Let's prove by induction that for all `l ∈ (k, i]`,
-  `WC_(l, (x-1) % size(WB_l)) = v` --- that is, the element
-  `WC_(l, (x-1) % size(WB_l))` is not changed in between `O_k` and `I_i`.
-  Since `O_k`
-  just pushed a value to the index `x-1`, it trivially holds for the base case `l = k+1`. Now
-  suppose that it holds for `l = m` for some `m ∈ (k, j-1]` and prove that it holds for `l =
-  m+1`. Since `O_k` is the last operation that writes `bottom = x` before `O_j` writes `bottom =
-  x-1`, `O_m` is not a regular `pop()` that writes `bottom = x-1`. If `O_m` is resizing, then for
-  the values `z` and `w` that `O_m` read from `bottom` at `'L301` and `top` at `'L302`,
-  respectively, we have `z >= x` by the choice of `O_k` and `w <= y` by the coherence on
-  `top`. Since `y < x`, `WC_(m, (x-1) % size(WB_m)) = v` is copied to `WC_(m+1, (x-1) %
-  size(WB_(m+1)))`.
+  Let us prove by induction that for all `l ∈ (k, i]` such that `I_l` is
+  an owner invocation, `WC_(l, (x-1) % size(WB_l)) = v`---that is, the element
+  `WC_(l, (x-1) % size(WB_l))` is not changed in between `I_k` and `I_i`.
+  Since `I_k` just pushed `v` to the index `x-1`, this trivially holds for the
+  base case `l = k+1`. Now suppose that the fact holds for `l = m` for some
+  `m ∈ (k, i-1]`, we prove that it holds for `l = m+1`.
+  Also note that since `m < i`, we have `(SEQ)` for `I_m` by the outer induction.
+  Note that the inner induction is defined very informally. Formally it should
+  be defined on only owner invocations that are between `I_k` and `I_i`.
 
-  Thus `I_i = O_j` returns `WC_(j, (x-1) % size(WB_j))`, which equals to `v`.
+  Since `I_k` is the last `push()` that writes `bottom = x` before `I_i` writes `bottom = x-1`, `I_m` is not a regular `pop()` that writes `bottom = x-1`.
+  If `I_m` is a regular `pop()`, then there should be another `push()` in between
+  that increases `bottom` back to `x`, so that `I_i` can write `bottom = x-1`,
+  thus `I_k` cannot be the last `push()`---contradiction.
+
+  If `I_m` is resizing, then for the values `z` and `w` that `I_m` reads from
+  `bottom` at `'L301` and `top` at `'L302`, respectively, we have (1) `z >= x`
+  since `I_k` is the last `push()` that writes `x`, and (2) `w <= y` by the
+  coherence on `top`. So `w <= y < x <= z`, thus `WC_(m, (x-1) % size(WB_m)) = v`
+  is copied to `WC_(m+1, (x-1) % size(WB_(m+1)))`.
+
+  Thus `I_i` returns `WC_(i, (x-1) % size(WB_i))`, which equals `v`.
 
 - Case 3: `I_i` is an irregular `pop()`.
 
