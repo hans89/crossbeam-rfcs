@@ -1028,11 +1028,11 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
     <!-- ---------- -->
     <!-- read t f (<= y-1) -->
 
-    Let `z` and `w` be the value that `I_k` reads from `bottom` at `'L101`
+    <!-- Let `z` and `w` be the value that `I_k` reads from `bottom` at `'L101`
     and `top` at `'L102` respectively. Since `I_i` is linearized after `I_k`,
     there is a release-acquire synchronization from `I_k`'s write to `bottom` at
     `'L110` to `I_i`'s read from `bottom` at `'L403`. Thus we have `w <= y`
-    because `I_i` reads `y` once more from `top` at `'L407`.
+    because `I_i` reads `y` once more from `top` at `'L407`. -->
 
     We prove that by induction for all `j ∈ [k+1, i)` where `I_j` is an owner
     invocation, `WC_(j, y % size(WB_j)) = v`.
@@ -1040,13 +1040,21 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
     Now suppose that it holds for for some `j ∈ [k+1, i-2)` and let us prove
     that it holds also for `j+1`.
 
-    Let `f` and `g` be the values `I_j` read from `bottom` and `top` respectively.
-    By `(BOTTOM)` and `(**)`, `f = b_j > y`.
-    We show that `g <= y`, thus `g < f`.
+    Let `z` and `w` be the values `I_j` read from `bottom` and `top` respectively.
+    By `(BOTTOM)` and `(**)`, `z = b_j > y`.
+    We show that `w <= y`. Suppose that `I_j` reads `w > y`. Let `I_h` be
+    the one that writes `w` to `top`. By `(TOP-ORDERING)`, `I_h` is ordered after
+    `I_i`. If `I_h` is a `pop()`, then by coherence `I_j` must be ordered after
+    `I_h` and thus `I_i`---contradiction.
+    Suppose `I_h` is a `steal()`. If `I_j` is a `push()`, then we have a
+    release-acquire synchronization through `top` from `I_h`'s `'L407` to
+    `I_j`'s `'L102`, and then through `bottom` from `I_j`'s `'L110` to `I_i`'s
+    `'L403` and then it is not possible for `I_i` to reads `y` again at `'L407`
+    anymore. If `I_j` is a `pop()`... WIP: I DON'T KNOW YET...
 
-    Since `k < j`, `I_j` is not a regular `pop()` that writes `bottom = y`
-    (an irregular `pop()` does not resize).
-    If `I_j` is resizing `push()`, then since `g < f`, `WC_(j, y % size(WB_j))`
+    <!-- Since `k < j`, `I_j` is not a regular `pop()` that writes `bottom = y`. -->
+
+    If `I_j` is resizing, then since `w <= y < z`, `WC_(j, y % size(WB_j))`
     is copied to `WC_(j+1, y % size(WB_(j+1)))`.
     Thus we have `WC_(j+1, y % size(WB_(j+1))) = v`.
 
