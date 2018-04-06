@@ -1078,24 +1078,29 @@ For `x = b_(i-1)`, `A_(i+1)[x]` is the exact last value inserted.
 
     Consider the invocation `I` that writes `y` to `top`. By
     `(TOP)`, it is sufficient to prove that `I` is linearized before `I_i`.
-    Suppose `I` is `pop()`. Then there is a release-acquire
-    synchronization from `I`'s write to `top` at `'L213` and `I_i` read from `top` at `'L401-'L402`,
-    and `x` should be coherence-after-or `WF_j`. Thus `I` should be linearized before `I_i`. If `I`
-    is `steal()`, then by a release-acquire synchronization from `I`'s write to `top` at `'L407` to
-    `I_i`'s read from `top` at `'L401-'L402`, `x` should be coherence-after-or the value `I` read
+    Suppose `I` is `pop()`. Then the read at `'L403` by `I` synchronizes with
+    the write at `'L202` by `I_i`, due to the SC fences and the fact that
+    `I_i` reads `y` from the write at `'L213` by `I`.
+    Thus `I_i` reads from `bottom` a value coherence-after-or `WF` of `I`.
+    Thus `I` should be linearized before `I_i` (as `I_i` is an `Empty` steal).
+
+    If `I` is `steal()`, then by a release-acquire synchronization from `I`'s
+    write to `top` at `'L407` to `I_i`'s read from `top` at `'L401-'L402`, `x`
+    should be coherence-after-or the value `I` read
     from `bottom` at `'L403`. Thus `I` should be linearized before `I_i`.
 
     Then we have `b_i = x <= y <= t_i`.
 
-  + Case `x = (b_i)-1`.
+  + Case `x = (b_i)-1`. We prove `x+1 <= t_i`
 
-    The value `x` should be read from `WF_j` for some `O_j` that is `pop()` taking the irregular
-    path. Let `k` be such an index that `O_j = I_k`. Since `I_i` returns `EMPTY`, we have `k <
-    i`. Let `w` be the value `O_j` read from `top` at `'L204`. Since `O_j` takes the irregular path,
-    we have `w >= x`. By `(BOTTOM)`, we have `b_k = x+1`.
+    The value `x` should be read from `WF_k` for some `I_k` that is an irregular
+    `pop()`. Since `I_i` returns `EMPTY`, we have `k < i`.
+    Let `w` be the value `I_k` read from `top` at `'L204`. Since `I_k`
+    is irregular, we have `w >= x`. By `(BOTTOM)`, we have `b_k = x+1`.
 
-    If `O_j` returns `EMPTY`, then we have `x+1 = b_k <= t_k <= t_i`. If `O_j` returns a value, then
-    by `(TOP)`, we have `x+1 = t_(k+1) <= t_i`. In either case, we have `b_i = x+1 <= t_i`.
+    If `I_k` returns `EMPTY`, then we have `x+1 = b_k <= t_k <= t_i`.
+    If `I_k` returns a value, then by `(TOP)`, we have `x+1 = t_(k+1) <= t_i`.
+    In either case, we have `b_i = x+1 <= t_i`.
 
     <!-- <\!-- [O_j] -\-> -->
     <!-- <\!-- r b x+1 -\-> -->
