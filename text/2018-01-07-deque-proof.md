@@ -545,7 +545,9 @@ a value later than or equal to what `I_i` writes, and `pop()`'s are ordered by p
   If `O_k` happens before `I_j` or `O_k = I_j`, then `I_i` is ordered before `I_j`.
 
   Suppose that `I_j` happens before `O_k`. Then at `'L403` `I_i` must have
-  acquired `TS[top = t_j+1]` . By coherence `I_i`'s CAS
+  acquired `TS[top = t_j+1]` . `FIXME: may not be true`.
+
+  By coherence `I_i`'s CAS
   writes `t_i+1` with `TS[top=t_i+1] > TS[top=t_j+1]`. But `t_i < t_j`, and
   this contradicts `(TOP-INCREASING)`.
 
