@@ -540,16 +540,30 @@ a value later than or equal to what `I_i` writes, and `pop()`'s are ordered by p
   Contradiction.
 
 + Case : `I_i` is `steal()` and `I_j` is `pop()`. Suppose that `I_i` reads from
-  `bottom` a value written by an owner invocation `O_k`.
+  `bottom` a value written by an owner invocation `I_k`.
 
-  If `O_k` happens before `I_j` or `O_k = I_j`, then `I_i` is ordered before `I_j`.
+  If `O_k` happens before `I_j` or `I_k = I_j`, then `I_i` is ordered before `I_j`.
 
-  Suppose that `I_j` happens before `O_k`. Then at `'L403` `I_i` must have
-  acquired `TS[top = t_j+1]` . `FIXME: may not be true`.
+  Suppose that `I_j` happens before `I_k`.
+  Suppose now that all owner invocations between `I_j` and `I_k`
+  (including `I_j` and `I_k`) are irregular `pop()`'s. Then certainly
+  `I_i` is ordered before `I_j` and we are done.
 
+  Suppose otherwise that there is an owner invocation `I_m` between `I_j` and
+  `I_k` that is not an irregular `pop()`.
+  If `I_m` is a `push()`, then `I_i`, which at `'L403` does an acquire read of
+  `bottom` from `I_k` that is ordered after or equal to `I_m`, must synchronize
+  with `I_m`'s release write at `'L110`. Thus `I_i` before the CAS at `'L407`
+  must have acquired `TS[top = t_j+1]` which is written by `I_j`.
   By coherence `I_i`'s CAS
   writes `t_i+1` with `TS[top=t_i+1] > TS[top=t_j+1]`. But `t_i < t_j`, and
   this contradicts `(TOP-INCREASING)`.
+
+  Now consider `I_m` a regular `pop()`. Since `I_j` is an irregular `pop()`
+  that writes both to `bottom` and `top` the value `t_j+1`. Thus in order for
+  `I_m` to be a regular `pop()`, there must be yet another `push()` between
+  `I_j` and `I_m`. Then that `push()` follows also the above reasoning
+  and we have a contradiction.
 
 ### Proof of `(VIEW)`
 
